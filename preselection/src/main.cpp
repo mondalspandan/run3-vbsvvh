@@ -32,6 +32,7 @@ struct MyArgs : public argparse::Args {
     bool &runSPANetInference     = flag("spanet_infer", "Run SPANet inference").set_default(false);
     bool &storeHLT = flag("store_hlt", "Store HLT trigger branches in output").set_default(false);
     bool &cutflow = flag("cutflow", "Print cutflow").set_default(false);
+    bool &no_systs = flag("no_systs", "Skip all JES/JER variation branches (nominal only)").set_default(false);
 };
 
 RNode runAnalysis(RNode df, std::string ana, std::string run_number, bool isSignal, SPANet::SPANetInference *spanet_inference, SPANetRun2::SPANetInference *spanet_inference_run2, bool runSPANetInference = false, bool makeSpanetTrainingdata = false)
@@ -63,6 +64,8 @@ int main(int argc, char** argv) {
     auto args = argparse::parse<MyArgs>(argc, argv);
     std::string input_spec = args.spec;
     std::string output_file = args.name;
+
+    setStoreSysts(!args.no_systs);
 
     if (args.nthread > 64) {
         std::cerr << "Error: nthread cannot exceed 64 (requested: " << args.nthread << ")" << std::endl;

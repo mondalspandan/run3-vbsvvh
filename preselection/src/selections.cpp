@@ -1,6 +1,68 @@
 #include "selections.h"
 #include "cutflow.h"
 
+namespace {
+// AK4 good-jet selection as a string template, parametrised by the pt-column name.
+// Used for both the nominal mask (Jet_pt) and the per-source JES variations
+// (Jet_pt_jesAbsoluteUp, ...). Must be combined with `&& !Jet_vetoMap` after the veto
+// map has been applied (the nominal path does this via Redefine; the variation loop
+// appends it explicitly).
+inline std::string ak4GoodJetSelectionExpr(const std::string& ptCol) {
+    return "_dR_ak4_lep > 0.4 &&"
+           "((isRun3 && ((" + ptCol + " > 20 && (abs(Jet_eta) <= 2.5 || abs(Jet_eta) >= 3.0) && abs(Jet_eta) < 5.0) || "
+                        "(" + ptCol + " > 50 && abs(Jet_eta) > 2.5 && abs(Jet_eta) < 3.0))) ||"
+           "(isRun2 && " + ptCol + " > 20 && abs(Jet_eta) < 5.0)) &&  "
+           "(Jet_jetId >= 2)";
+}
+
+inline std::string ak8GoodJetSelectionExpr(const std::string& ptCol) {
+    return "_dR_ak8_lep > 0.8 && "
+           + ptCol + " > 250 && "
+           "abs(FatJet_eta) <= 2.5 && "
+           "FatJet_msoftdrop > 40 && "
+           "FatJet_jetId > 0";
+}
+
+// Kinematic-variation suffixes (JES + JER) whose varied jet columns actually exist in
+// this graph. Presence-checked rather than assumed: variations are MC-only (and only
+// with systematics enabled), so on data or with --no_systs this returns empty and the
+// selection stays nominal-only. Deriving the set from the columns the correction path
+// actually defined means there is no flag to keep in sync with that path.
+inline std::vector<std::string> activeKinVariations(RNode df) {
+    std::vector<std::string> out;
+    for (const auto& sfx : kinematicVariationSuffixes()) {
+        if (df.HasColumn("Jet_pt_" + sfx) && df.HasColumn("FatJet_pt_" + sfx))
+            out.push_back(sfx);
+    }
+    return out;
+}
+
+// Per-variation channel-pass-flag generation. Each channel filter that depends on a
+// jet-multiplicity cut emits a boolean per event for each variation v ∈ {nom} ∪
+// activeKinVariations() — passes_<channel>_<v> — then the channel filter is OR over
+// those flags. This keeps events that pass the channel under ANY variation, which is
+// the only way a single output file can carry per-variation histograms downstream.
+//
+// `expr_for(sfx)` returns the full pass condition for variation `sfx`. sfx == "" means
+// nominal; the lambda should return the nominal condition string in that case.
+template <typename F>
+RNode definePerVariationPassFlags(RNode df, const std::string& channel, F&& expr_for) {
+    df = df.Define("passes_" + channel + "_nom", expr_for(std::string{}));
+    for (const auto& sfx : activeKinVariations(df)) {
+        df = df.Define("passes_" + channel + "_" + sfx, expr_for(sfx));
+    }
+    return df;
+}
+
+inline std::string orPassExpr(RNode df, const std::string& channel) {
+    std::string out = "passes_" + channel + "_nom";
+    for (const auto& sfx : activeKinVariations(df)) {
+        out += " || passes_" + channel + "_" + sfx;
+    }
+    return out;
+}
+} // anonymous namespace
+
 // MET filters
 // https://twiki.cern.ch/twiki/bin/viewauth/CMS/MissingETOptionalFiltersRun2
 RNode METFilters(RNode df_) {
@@ -153,13 +215,56 @@ RNode AK4JetsSelection(RNode df_, bool cleanAgainstFJ, std::string affix)
                                     "((isRun3 && ((Jet_pt > 20 && (abs(Jet_eta) <= 2.5 || abs(Jet_eta) >= 3.0) && abs(Jet_eta) < 5.0) || "
                                     "(Jet_pt > 50 && abs(Jet_eta) > 2.5 && abs(Jet_eta) < 3.0))) ||"
                                     "(isRun2 && Jet_pt > 20 && abs(Jet_eta) < 5.0)) &&  "
-                                    "((is2016 && Jet_jetId >= 1) || (!is2016 && Jet_jetId >= 2))");
+                                    "(Jet_jetId >= 2)"); // NanoAOD jetID convention https://twiki.cern.ch/twiki/bin/view/CMSPublic/WorkBookNanoAOD#Jets
+                                                        // should still work for skims < v28, which set jetId==3 : "pass tight ID, fail tightLepVeto", jetId==7 : "pass tight and tightLepVeto ID"
 
     df = df.Filter("(isRun2) || (isRun3 && !Any(Jet_vetoMap))");
     df = df.Redefine("_good_ak4jets", "_good_ak4jets && !Jet_vetoMap");
 
     df = applyObjectMaskNewAffix(df, "_good_ak4jets", "Jet", affix);
     df = df.Define("ht_" + affix, "Sum(" + affix + "_pt)");
+
+    // Nominal + per-variation good-jet masks stored at the NanoAOD (capital-collection) level.
+    // Defined once, alongside the primary FJ-cleaned "jet" collection, and AFTER
+    // applyObjectMaskNewAffix so they are not aliased into lowercase jet_isGood columns.
+    // Downstream coffea uses Jet_isGood (nominal) and Jet_isGood_<sfx> (variations)
+    // uniformly to construct jet collections from the shared Jet_* arrays.
+    //
+    // Each per-variation mask is fat-jet-cleaned against the good fat jets FOR THAT
+    // variation (FatJet_isGood_<sfx>), so Jet_isGood_<sfx> parallels the FJ-cleaned nominal
+    // Jet_isGood (= _good_ak4jets for the "jet" affix). Only the good-fatjet membership
+    // changes with the variation; the ak4-ak8 dR geometry itself is JEC-invariant (eta/phi
+    // are unchanged by JEC). VVdR returns 999 for every AK4 jet when a variation has no good
+    // fat jets, so the >0.8 cut then passes (no cleaning) -- matching the nominal fj_cut.
+    //
+    // njet_<sfx> = Sum(Jet_isGood_<sfx>) then parallels the nominal `njet` (defined inside
+    // applyObjectMaskNewAffix, also FJ-cleaned) and feeds the per-variation channel-pass flags.
+    if (affix == "jet") {
+        df = df.Define("Jet_isGood", "_good_ak4jets");
+        for (const auto& sfx : activeKinVariations(df)) {
+            df = df.Define("_fatjet_eta_" + sfx, "FatJet_eta[FatJet_isGood_" + sfx + "]");
+            df = df.Define("_fatjet_phi_" + sfx, "FatJet_phi[FatJet_isGood_" + sfx + "]");
+            df = df.Define("_dR_ak4_fatjet_" + sfx, VVdR,
+                           {"Jet_eta", "Jet_phi", "_fatjet_eta_" + sfx, "_fatjet_phi_" + sfx});
+            df = df.Define("Jet_isGood_" + sfx,
+                           ak4GoodJetSelectionExpr("Jet_pt_" + sfx)
+                               + " && !Jet_vetoMap && _dR_ak4_fatjet_" + sfx + " > 0.8");
+            df = df.Define("njet_" + sfx, "Sum(Jet_isGood_" + sfx + ")");
+        }
+    }
+    // Nominal + per-variation masks for the non-FJ-cleaned collection, used by
+    // VBSTagging in channels that tag on "jetNoFJClean" (1lep_2FJ). No FJ cleaning to
+    // re-evaluate, so the mask is just the pt-varied good-jet expression + veto map.
+    // The Jet_ prefix means the masks are written to the output (snapshot keeps all
+    // Jet_* columns), mirroring Jet_isGood / Jet_isGood_<sfx> for the cleaned set.
+    else if (affix == "jetNoFJClean") {
+        df = df.Define("Jet_isGoodNoFJClean", "_good_ak4jets");
+        for (const auto& sfx : activeKinVariations(df)) {
+            df = df.Define("Jet_isGoodNoFJClean_" + sfx,
+                           ak4GoodJetSelectionExpr("Jet_pt_" + sfx) + " && !Jet_vetoMap");
+            df = df.Define("njetNoFJClean_" + sfx, "Sum(Jet_isGoodNoFJClean_" + sfx + ")");
+        }
+    }
     return df;
 }
 
@@ -177,39 +282,72 @@ RNode AK4JetProperties(RNode df_)
 RNode AK8JetsSelection(RNode df_)
 {
     auto df = df_.Define("_dR_ak8_lep", VVdR, {"FatJet_eta", "FatJet_phi", "lepton_eta", "lepton_phi"})
-                  .Define("_good_ak8jets", "_dR_ak8_lep > 0.8 && "
-                                           "FatJet_pt > 250 && "
-                                           "abs(FatJet_eta) <= 2.5 && "
-                                           "FatJet_msoftdrop > 40 && "
-                                           "FatJet_jetId > 0")
-                  .Define("nFatJets", "Sum(_good_ak8jets)");
+                  .Define("_good_ak8jets", ak8GoodJetSelectionExpr("FatJet_pt"));
 
     df = applyObjectMaskNewAffix(df, "_good_ak8jets", "FatJet", "fatjet");
     df = df.Define("ht_fatjets", "Sum(fatjet_pt)");
 
+    // Nominal good-fat-jet mask and count — defined AFTER applyObjectMaskNewAffix so they
+    // are not aliased into fatjet_isGood. FatJet_isGood (nominal) mirrors the per-variation
+    // FatJet_isGood_<sfx> branches; coffea uses them uniformly.
+    df = df.Define("FatJet_isGood", "_good_ak8jets");
+    df = df.Define("nFatJets",      "Sum(FatJet_isGood)");
+
+    // Per-variation good-fatjet masks. JES/JER affect FatJet_pt only; FatJet_msoftdrop is
+    // unchanged. Defined AFTER applyObjectMaskNewAffix for the same reason as the AK4 case.
+    for (const auto& sfx : activeKinVariations(df)) {
+        df = df.Define("FatJet_isGood_" + sfx, ak8GoodJetSelectionExpr("FatJet_pt_" + sfx));
+        df = df.Define("nFatJets_" + sfx, "Sum(FatJet_isGood_" + sfx + ")");
+    }
     return df;
 }
 
 // Perform VBS jet tagging via VBSBDTInfer and compute VBS pair kinematics
-// Note this requires at least 2 jets (i.e., applies a njet >= 2 filter)
+// The nominal or a variation with < 2 taggable jets gets sentinel values instead (indices -1, score/kinematics -999).
 RNode VBSTagging(RNode df_, std::string jetCollectionName = "jet")
 {
-    return df_.Filter("n" + jetCollectionName + " >= 2", "At-least 2 overlap-removed (against FJ) jets")
+    // All-jet-level mask stem for the tagging collection. The per-variation masks are
+    // defined in AK4JetsSelection for both stems.
+    const bool fjCleaned = (jetCollectionName == "jet");
+    const std::string maskStem = fjCleaned ? "Jet_isGood" : "Jet_isGoodNoFJClean";
+
+    // Continue to store the full four vector of the two VBS candidates when running 
+    // on nominal for backwards compatibility.
+    auto df = df_
         .Define("_vbs_candidate_jet_pairs", VBSBDTInfer, {jetCollectionName + "_pt", jetCollectionName + "_eta", jetCollectionName + "_phi", jetCollectionName + "_mass", "isRun2"})
-        .Define("vbs_jet1_idx", "static_cast<int>(_vbs_candidate_jet_pairs[0])")
+        .Define("vbs_jet1_idx", "static_cast<int>(_vbs_candidate_jet_pairs[0])") // indices in the "good jet" collection
         .Define("vbs_jet2_idx", "static_cast<int>(_vbs_candidate_jet_pairs[1])")
-        .Define("vbs_score", "_vbs_candidate_jet_pairs[2]")
-        .Define("vbs_jet1_pt",   jetCollectionName + "_pt[vbs_jet1_idx]")
-        .Define("vbs_jet1_eta",  jetCollectionName + "_eta[vbs_jet1_idx]")
-        .Define("vbs_jet1_phi",  jetCollectionName + "_phi[vbs_jet1_idx]")
-        .Define("vbs_jet1_mass", jetCollectionName + "_mass[vbs_jet1_idx]")
-        .Define("vbs_jet2_pt",   jetCollectionName + "_pt[vbs_jet2_idx]")
-        .Define("vbs_jet2_eta",  jetCollectionName + "_eta[vbs_jet2_idx]")
-        .Define("vbs_jet2_phi",  jetCollectionName + "_phi[vbs_jet2_idx]")
-        .Define("vbs_jet2_mass", jetCollectionName + "_mass[vbs_jet2_idx]")
-        .Define("vbs_mjj",    "(ROOT::Math::PtEtaPhiMVector(vbs_jet1_pt, vbs_jet1_eta, vbs_jet1_phi, vbs_jet1_mass) + "
-                              "ROOT::Math::PtEtaPhiMVector(vbs_jet2_pt, vbs_jet2_eta, vbs_jet2_phi, vbs_jet2_mass)).M()")
-        .Define("vbs_detajj", "abs(vbs_jet1_eta - vbs_jet2_eta)");
+        .Define("vbs_score", "vbs_jet1_idx >= 0 ? _vbs_candidate_jet_pairs[2] : -999.f")
+        .Define("vbs_jet1_pt",   "vbs_jet1_idx >= 0 ? " + jetCollectionName + "_pt[vbs_jet1_idx]   : -999.f")
+        .Define("vbs_jet1_eta",  "vbs_jet1_idx >= 0 ? " + jetCollectionName + "_eta[vbs_jet1_idx]  : -999.f")
+        .Define("vbs_jet1_phi",  "vbs_jet1_idx >= 0 ? " + jetCollectionName + "_phi[vbs_jet1_idx]  : -999.f")
+        .Define("vbs_jet1_mass", "vbs_jet1_idx >= 0 ? " + jetCollectionName + "_mass[vbs_jet1_idx] : -999.f")
+        .Define("vbs_jet2_pt",   "vbs_jet2_idx >= 0 ? " + jetCollectionName + "_pt[vbs_jet2_idx]   : -999.f")
+        .Define("vbs_jet2_eta",  "vbs_jet2_idx >= 0 ? " + jetCollectionName + "_eta[vbs_jet2_idx]  : -999.f")
+        .Define("vbs_jet2_phi",  "vbs_jet2_idx >= 0 ? " + jetCollectionName + "_phi[vbs_jet2_idx]  : -999.f")
+        .Define("vbs_jet2_mass", "vbs_jet2_idx >= 0 ? " + jetCollectionName + "_mass[vbs_jet2_idx] : -999.f")
+        .Define("vbs_mjj",    "vbs_jet1_idx >= 0 ? (ROOT::Math::PtEtaPhiMVector(vbs_jet1_pt, vbs_jet1_eta, vbs_jet1_phi, vbs_jet1_mass) + "
+                              "ROOT::Math::PtEtaPhiMVector(vbs_jet2_pt, vbs_jet2_eta, vbs_jet2_phi, vbs_jet2_mass)).M() : -999.")
+        .Define("vbs_detajj", "vbs_jet1_idx >= 0 ? abs(vbs_jet1_eta - vbs_jet2_eta) : -999.");
+
+    // Nominal VBS-jet indices in the all-jet (NanoAOD Jet_*) collection, corresponding 
+    // to the same physical jets as vbs_jet1/2_idx; stored so downstream
+    // handles nominal and variations uniformly via Jet_*[vbs_jet*_Jetidx*].
+    df = df.Define("vbs_jet1_Jetidx", "vbs_jet1_idx >= 0 ? static_cast<int>(ROOT::VecOps::Nonzero(" + maskStem + ")[vbs_jet1_idx]) : -1")
+           .Define("vbs_jet2_Jetidx", "vbs_jet2_idx >= 0 ? static_cast<int>(ROOT::VecOps::Nonzero(" + maskStem + ")[vbs_jet2_idx]) : -1");
+
+    // Per-variation VBS tagging: re-run the BDT on the variation's good-jet set with its
+    // varied pt/mass (eta/phi are JEC-invariant). Only the two all-jet-frame indices and
+    // the score are stored per variation — downstream can rebuild the kinematics from
+    // Jet_*[vbs_jet*_Jetidx*], keeping the branch count small.
+    for (const auto& sfx : activeKinVariations(df)) {
+        df = df.Define("_vbs_pair_" + sfx, VBSBDTInferMasked,
+                       {maskStem + "_" + sfx, "Jet_pt_" + sfx, "Jet_eta", "Jet_phi", "Jet_mass_" + sfx, "isRun2"});
+        df = df.Define("vbs_jet1_Jetidx_" + sfx, "static_cast<int>(_vbs_pair_" + sfx + "[0])");
+        df = df.Define("vbs_jet2_Jetidx_" + sfx, "static_cast<int>(_vbs_pair_" + sfx + "[1])");
+        df = df.Define("vbs_score_" + sfx, "_vbs_pair_" + sfx + "[2]");
+    }
+    return df;
 }
 
 
@@ -255,11 +393,12 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut)
         df = TriggerSelections(df,trigger_logic_string_0lep0FJ);
         Cutflow::Add(df, "C1: Trigger selection");
 
-        df = df.Filter(
-            "((nMuon_Loose == 0) && (nElectron_Loose == 0)) &&"
-            "(nFatJets == 0)",
-            "C2: 0lep_0FJ"
-        );
+        df = definePerVariationPassFlags(df, "0lep_0FJ", [](const std::string& sfx){
+            const std::string n = sfx.empty() ? "nFatJets" : "nFatJets_" + sfx;
+            return "((nMuon_Loose == 0) && (nElectron_Loose == 0)) && (" + n + " == 0)";
+        });
+        df = df.Filter(orPassExpr(df, "0lep_0FJ"), "C2: 0lep_0FJ");
+
         df = df.Define("met_significance", "PuppiMET_significance")
                 .Define("met_uncorrPt", "PuppiMET_pt")
                 .Define("met_uncorrPhi", "PuppiMET_phi");
@@ -274,14 +413,18 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut)
         df = TriggerSelections(df,trigger_logic_string_0lep1FJ);
         Cutflow::Add(df, "C1: Trigger selection");
 
-        df = df.Filter(
-            "((nMuon_Loose == 0) && (nElectron_Loose == 0)) &&"
-            "(nFatJets == 1)",
-            "C2: 0lep_1FJ"
-        );
-        df = df.Define("met_significance", "PuppiMET_significance")
+        df = definePerVariationPassFlags(df, "0lep_1FJ", [](const std::string& sfx){
+            const std::string n = sfx.empty() ? "nFatJets" : "nFatJets_" + sfx;
+            return "((nMuon_Loose == 0) && (nElectron_Loose == 0)) && (" + n + " == 1)";
+        });
+        df = df.Filter(orPassExpr(df, "0lep_1FJ"), "C2: 0lep_1FJ");
+
+        df = df.DefaultValueFor("Pileup_nTrueInt", (float)-1.f)
+                .Define("met_significance", "PuppiMET_significance")
                 .Define("met_uncorrPt", "PuppiMET_pt")
-                .Define("met_uncorrPhi", "PuppiMET_phi");
+                .Define("met_uncorrPhi", "PuppiMET_phi")
+                .Define("pileup_nTrueInt", "Pileup_nTrueInt")
+                .Define("pv_npvsGood", "PV_npvsGood");
 
     }
 
@@ -294,11 +437,11 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut)
         df = TriggerSelections(df,trigger_logic_string_met);
         Cutflow::Add(df, "C1: Trigger selection");
 
-        df = df.Filter(
-            "((nMuon_Loose == 0) && (nElectron_Loose == 0)) &&"
-            "(nFatJets == 1)",
-            "C2: 0lep_1FJ"
-        );
+        df = definePerVariationPassFlags(df, "0lep_1FJ_met", [](const std::string& sfx){
+            const std::string n = sfx.empty() ? "nFatJets" : "nFatJets_" + sfx;
+            return "((nMuon_Loose == 0) && (nElectron_Loose == 0)) && (" + n + " == 1)";
+        });
+        df = df.Filter(orPassExpr(df, "0lep_1FJ_met"), "C2: 0lep_1FJ");
     }
 
     // 0lep_2FJ
@@ -310,11 +453,18 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut)
         df = TriggerSelections(df,trigger_logic_string_ht);
         Cutflow::Add(df, "C1: Trigger selection");
 
-        df = df.Filter(
-            "((nMuon_Loose == 0) && (nElectron_Loose == 0)) &&"
-            "(nFatJets == 2)",
-            "C2: 0lep_2FJ"
-        );
+        df = definePerVariationPassFlags(df, "0lep_2FJ", [](const std::string& sfx){
+            const std::string n = sfx.empty() ? "nFatJets" : "nFatJets_" + sfx;
+            return "((nMuon_Loose == 0) && (nElectron_Loose == 0)) && (" + n + " == 2)";
+        });
+        df = df.Filter(orPassExpr(df, "0lep_2FJ"), "C2: 0lep_2FJ");
+
+        df = df.DefaultValueFor("Pileup_nTrueInt", (float)-1.f)
+                .Define("met_significance", "PuppiMET_significance")
+                .Define("met_uncorrPt", "PuppiMET_pt")
+                .Define("met_uncorrPhi", "PuppiMET_phi")
+                .Define("pileup_nTrueInt", "Pileup_nTrueInt")
+                .Define("pv_npvsGood", "PV_npvsGood");
     }
 
     // 0lep_2FJ_met
@@ -326,11 +476,11 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut)
         df = TriggerSelections(df,trigger_logic_string_met);
         Cutflow::Add(df, "C1: Trigger selection");
 
-        df = df.Filter(
-            "((nMuon_Loose == 0) && (nElectron_Loose == 0)) &&"
-            "(nFatJets == 2)",
-            "C2: 0lep_2FJ"
-        );
+        df = definePerVariationPassFlags(df, "0lep_2FJ_met", [](const std::string& sfx){
+            const std::string n = sfx.empty() ? "nFatJets" : "nFatJets_" + sfx;
+            return "((nMuon_Loose == 0) && (nElectron_Loose == 0)) && (" + n + " == 2)";
+        });
+        df = df.Filter(orPassExpr(df, "0lep_2FJ_met"), "C2: 0lep_2FJ");
     }
 
     // 0lep_3FJ
@@ -342,14 +492,17 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut)
         df = TriggerSelections(df,trigger_logic_string_ht);
         Cutflow::Add(df, "C1: Trigger selection");
 
-        df = df.Filter(
-            "((nMuon_Loose == 0) && (nElectron_Loose == 0)) &&"
-            "(nFatJets == 3)",
-            "C2: 0lep_3FJ"
-        );
+        df = definePerVariationPassFlags(df, "0lep_3FJ", [](const std::string& sfx){
+            const std::string n = sfx.empty() ? "nFatJets" : "nFatJets_" + sfx;
+            return "((nMuon_Loose == 0) && (nElectron_Loose == 0)) && (" + n + " == 3)";
+        });
+        df = df.Filter(orPassExpr(df, "0lep_3FJ"), "C2: 0lep_3FJ");
     }
 
-    // 1lep_1FJ
+    // 1lep_1FJ — fatjet + njet cuts must combine inside a single per-variation pass flag,
+    // because OR-ing over two consecutive jet-count filters would mix variations across
+    // different cuts. Cutflow C3 + C4 (separate fatjet/njet steps) collapse into a single
+    // "any-variation jet selection" entry.
     else if (channel == "1lep_1FJ"){
 
         df = VBSTagging(df);
@@ -362,13 +515,16 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut)
                        "(nMuon_Loose == 0 && nMuon_Tight == 0 && nElectron_Loose == 1 && nElectron_Tight == 1)) && "
                        "(lepton_pt[0] > 40)");
         Cutflow::Add(df, "C2: 1-lepton selection");
-        df = df.Filter("nfatjet == 1");
-        Cutflow::Add(df, "C3: exactly 1 fat jet");
-        df = df.Filter("njet >= 4");
-        Cutflow::Add(df, "C4: at-least 4 jets");
+
+        df = definePerVariationPassFlags(df, "1lep_1FJ", [](const std::string& sfx){
+            const std::string fj = sfx.empty() ? "nFatJets" : "nFatJets_" + sfx;
+            const std::string j  = sfx.empty() ? "njet"     : "njet_"     + sfx;
+            return "(" + fj + " == 1) && (" + j + " >= 4)";
+        });
+        df = df.Filter(orPassExpr(df, "1lep_1FJ"), "C3: jet selection (any variation)");
     }
 
-    // 1lep_2FJ
+    // 1lep_2FJ — same caveat as 1lep_1FJ (C3 + C4 collapsed).
     else if (channel == "1lep_2FJ"){
 
         df = VBSTagging(df, "jetNoFJClean");
@@ -385,9 +541,13 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut)
                        "(lepton_pt[0] > 40)");
                        
         Cutflow::Add(df, "C2: 1-lepton selection");
-        df = df.Filter("nfatjet >= 2");
-        Cutflow::Add(df, "C3: at-least 2 fat jets");
 
+        df = definePerVariationPassFlags(df, "1lep_2FJ", [](const std::string& sfx){
+            const std::string fj = sfx.empty() ? "nFatJets" : "nFatJets_" + sfx;
+            const std::string j  = sfx.empty() ? "njet"     : "njet_"     + sfx;
+            return "(" + fj + " >= 2) && (" + j + " >= 2)";
+        });
+        df = df.Filter(orPassExpr(df, "1lep_2FJ"), "C3: jet selection (any variation)");
     }
 
     // 2lepSS
@@ -415,11 +575,11 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut)
         df = TriggerSelections(df,trigger_logic_string_multilep);
         Cutflow::Add(df, "C1: Trigger selection");
 
-        df = df.Filter(
-            "((nMuon_Loose + nElectron_Loose) == 2) &&"
-            "(nFatJets == 1)",
-            "C2: 2lep_1FJ"
-        );
+        df = definePerVariationPassFlags(df, "2lep_1FJ", [](const std::string& sfx){
+            const std::string n = sfx.empty() ? "nFatJets" : "nFatJets_" + sfx;
+            return "((nMuon_Loose + nElectron_Loose) == 2) && (" + n + " == 1)";
+        });
+        df = df.Filter(orPassExpr(df, "2lep_1FJ"), "C2: 2lep_1FJ");
     }
 
     // 2lep_2FJ
@@ -431,11 +591,11 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut)
         df = TriggerSelections(df,trigger_logic_string_multilep);
         Cutflow::Add(df, "C1: Trigger selection");
 
-        df = df.Filter(
-            "((nMuon_Loose + nElectron_Loose) == 2) &&"
-            "(nFatJets == 2)",
-            "C2: 2lep_2FJ"
-        );
+        df = definePerVariationPassFlags(df, "2lep_2FJ", [](const std::string& sfx){
+            const std::string n = sfx.empty() ? "nFatJets" : "nFatJets_" + sfx;
+            return "((nMuon_Loose + nElectron_Loose) == 2) && (" + n + " == 2)";
+        });
+        df = df.Filter(orPassExpr(df, "2lep_2FJ"), "C2: 2lep_2FJ");
     }
 
 

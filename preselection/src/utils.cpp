@@ -72,6 +72,16 @@ RNode applyObjectMaskNewAffix(RNode df, const std::string &maskName, const std::
         if (colName.starts_with(objectName + "_"))
         {
             std::string suffix = colName.substr(objectName.size() + 1);
+            // Skip per-source systematic-variation columns. Those carry their own per-
+            // variation good-jet masks (Jet_isGood_jes*) and downstream coffea reads them
+            // at the all-jet level, so they must NOT be aliased through the nominal mask.
+            if (suffix.find("_jes") != std::string::npos
+                || suffix.find("_jer") != std::string::npos
+                || suffix.find("_jms") != std::string::npos
+                || suffix.find("_jmr") != std::string::npos
+                || suffix.find("_unclust") != std::string::npos) {
+                continue;
+            }
             std::string newCol = newAffix + "_" + suffix;
             df = df.Define(newCol, colName + "[" + maskName + "]");
         }
@@ -327,11 +337,31 @@ RVec<float> VBSBDTInfer(RVec<float> Jet_pt, RVec<float> Jet_eta, RVec<float> Jet
     }
     auto max_score_idx = std::distance(scores.begin(), std::max_element(scores.begin(), scores.end()));
     if (scores.size() > 0) {
-        return RVec<float>{static_cast<float>(combination_idxs[0][max_score_idx]), 
+        return RVec<float>{static_cast<float>(combination_idxs[0][max_score_idx]),
                          static_cast<float>(combination_idxs[1][max_score_idx]),
                          scores[max_score_idx]};
     }
     return RVec<float>{-1, -1, -1};
+}
+
+// VBS tagging on the subset of jets selected by `isGood`, with the returned pair
+// indices mapped back into the all-jet (NanoAOD Jet_*) frame, so they dereference
+// Jet_pt_<sfx>/Jet_eta/... directly without needing the mask downstream.
+// Returns {jet1_JetIdx, jet2_JetIdx, score}; {-1, -1, -999} if fewer than 2 good jets
+// (score sentinel deliberately outside the BDT output range).
+RVec<float> VBSBDTInferMasked(const RVec<int>& isGood, const RVec<float>& Jet_pt, const RVec<float>& Jet_eta, const RVec<float>& Jet_phi, const RVec<float>& Jet_mass, bool isRun2) {
+    auto idx = ROOT::VecOps::Nonzero(isGood);
+    if (idx.size() < 2) {
+        return RVec<float>{-1, -1, -999};
+    }
+    auto pair = VBSBDTInfer(ROOT::VecOps::Take(Jet_pt, idx), ROOT::VecOps::Take(Jet_eta, idx),
+                            ROOT::VecOps::Take(Jet_phi, idx), ROOT::VecOps::Take(Jet_mass, idx), isRun2);
+    if (pair[0] < 0) {
+        return RVec<float>{-1, -1, -999};
+    }
+    return RVec<float>{static_cast<float>(idx[static_cast<size_t>(pair[0])]),
+                       static_cast<float>(idx[static_cast<size_t>(pair[1])]),
+                       pair[2]};
 }
 
 /*
@@ -374,13 +404,27 @@ void saveSnapshot(RNode df, const std::string &outputDir, const std::string &out
     final_variables.push_back("luminosityBlock");
     final_variables.push_back("event");
 
-    // do not store branches that start with "_" nor raw NanoAOD collections
+    // Drop internal RDF helpers ("_*") and the raw lepton collections (Electron_, Muon_)
+    // — leptons live under the lowercase aliases (electron_, muon_) defined by the
+    // selection step. Capital Jet_* / FatJet_* are kept in full so downstream coffea can
+    // construct per-variation jet collections from the all-jet-level attributes plus the
+    // per-variation good-jet booleans (Jet_isGood_jes*, FatJet_isGood_jes*) defined in
+    // selections.cpp. The lowercase jet_* / fatjet_* nominal-good-jets aliases are also
+    // kept (existing analysis code reads through them).
     for (auto &&ColName : ColNames) {
-        if (ColName.starts_with("_") || ColName.starts_with("Jet") || ColName.starts_with("FatJet_") || ColName.starts_with("Electron_") || ColName.starts_with("Muon_"))
-        {
-            continue;
-        }
+        if (ColName.starts_with("_")) continue;
+        if (ColName.starts_with("Electron_") || ColName.starts_with("Muon_")) continue;
         final_variables.push_back(ColName);
+    }
+
+    // Pull in the raw NanoAOD capital Jet_* / FatJet_* attributes (which are not in the
+    // Defined-columns list above). Keep all of them — option-A storage layout.
+    auto allColNames = df.GetColumnNames();
+    for (auto &&col : allColNames) {
+        if ((col.starts_with("Jet_") || col.starts_with("FatJet_")) &&
+            std::find(final_variables.begin(), final_variables.end(), col) == final_variables.end()) {
+            final_variables.push_back(col);
+        }
     }
 
     // Optionally store HLT branches from input NanoAOD, providing default values
@@ -399,12 +443,17 @@ void saveSnapshot(RNode df, const std::string &outputDir, const std::string &out
     if (isSig) {
         final_variables.push_back("LHEReweightingWeight");
         final_variables.push_back("nLHEReweightingWeight");
+        final_variables.push_back("LHEPdfWeight");
+        final_variables.push_back("nLHEPdfWeight");
     }
 
     // store all columns from input nanoAOD tree
     if (dumpInput) {
         auto nanoColNames = df.GetColumnNames();
         for (auto &&colName : nanoColNames) {
+            // Skip internal "_"-prefixed helper columns: input NanoAOD branches never start with
+            // "_", and some helpers (e.g. the Type-1 MET blocks/pairs) have no ROOT dictionary.
+            if (colName.starts_with("_")) continue;
             if ((std::find(final_variables.begin(), final_variables.end(), colName) == final_variables.end()) &&
                 (colName.find("HLT") == std::string::npos) && (colName.find("L1") == std::string::npos)) {
                 final_variables.push_back(colName);
