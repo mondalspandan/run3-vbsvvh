@@ -90,20 +90,20 @@ struct MuonCorrectionSet {
 };
 
 const std::unordered_map<std::string, std::vector<std::string>> muonWorkingPointSFs = {
-    {"weight_muon_looseid_looseiso", {
-        "weight_muon_reco",
-        "weight_muon_id_loose",
-        "weight_muon_iso_looseid_looseiso"
+    {"_weight_muon_looseid_looseiso", {
+        "_weight_muon_reco",
+        "_weight_muon_id_loose",
+        "_weight_muon_iso_looseid_looseiso"
     }},
-    {"weight_muon_mediumid_tightiso", {
-        "weight_muon_reco",
-        "weight_muon_id_medium",
-        "weight_muon_iso_mediumid_tightiso"
+    {"_weight_muon_mediumid_tightiso", {
+        "_weight_muon_reco",
+        "_weight_muon_id_medium",
+        "_weight_muon_iso_mediumid_tightiso"
     }},
-    {"weight_muon_tightid_tightiso", {
-        "weight_muon_reco",
-        "weight_muon_id_tight",
-        "weight_muon_iso_tightid_tightiso"
+    {"_weight_muon_tightid_tightiso", {
+        "_weight_muon_reco",
+        "_weight_muon_id_tight",
+        "_weight_muon_iso_tightid_tightiso"
     }}
 };
 
@@ -130,14 +130,14 @@ struct MuonSFConfig {
 
 const std::unordered_map<std::string, MuonSFConfig> muonSFConfigs = {
     // RECO SF (Run 2 only, only defined above 40 GeV, returns 1.0 for Run 3 years)
-    {"weight_muon_reco", {{
+    {"_weight_muon_reco", {{
         {"2016preVFP",  {"NUM_TrackerMuons_DEN_genTracks", 40.0}},
         {"2016postVFP", {"NUM_TrackerMuons_DEN_genTracks", 40.0}},
         {"2017",        {"NUM_TrackerMuons_DEN_genTracks", 40.0}},
         {"2018",        {"NUM_TrackerMuons_DEN_genTracks", 40.0}},
     }}},
     // ID SFs
-    {"weight_muon_id_loose", {{
+    {"_weight_muon_id_loose", {{
         {"2016preVFP",            {"NUM_LooseID_DEN_TrackerMuons", 15.1}},
         {"2016postVFP",           {"NUM_LooseID_DEN_TrackerMuons", 15.1}},
         {"2017",                  {"NUM_LooseID_DEN_TrackerMuons", 15.1}},
@@ -148,7 +148,7 @@ const std::unordered_map<std::string, MuonSFConfig> muonSFConfigs = {
         {"2023PromptD",           {"NUM_LooseID_DEN_TrackerMuons", 15.1}},
         {"2024Prompt",            {"NUM_LooseID_DEN_TrackerMuons", 10.1}},
     }}},
-    {"weight_muon_id_medium", {{
+    {"_weight_muon_id_medium", {{
         {"2016preVFP",            {"NUM_MediumID_DEN_TrackerMuons", 15.1}},
         {"2016postVFP",           {"NUM_MediumID_DEN_TrackerMuons", 15.1}},
         {"2017",                  {"NUM_MediumID_DEN_TrackerMuons", 15.1}},
@@ -159,7 +159,7 @@ const std::unordered_map<std::string, MuonSFConfig> muonSFConfigs = {
         {"2023PromptD",           {"NUM_MediumID_DEN_TrackerMuons", 15.1}},
         {"2024Prompt",            {"NUM_MediumID_DEN_TrackerMuons", 10.1}},
     }}},
-    {"weight_muon_id_tight", {{
+    {"_weight_muon_id_tight", {{
         {"2016preVFP",            {"NUM_TightID_DEN_TrackerMuons", 15.1}},
         {"2016postVFP",           {"NUM_TightID_DEN_TrackerMuons", 15.1}},
         {"2017",                  {"NUM_TightID_DEN_TrackerMuons", 15.1}},
@@ -171,7 +171,7 @@ const std::unordered_map<std::string, MuonSFConfig> muonSFConfigs = {
         {"2024Prompt",            {"NUM_TightID_DEN_TrackerMuons", 10.1}},
     }}},
     // ISO SFs
-    {"weight_muon_iso_looseid_looseiso", {{
+    {"_weight_muon_iso_looseid_looseiso", {{
         {"2016preVFP",            {"NUM_LooseRelIso_DEN_LooseID", 15.1}},
         {"2016postVFP",           {"NUM_LooseRelIso_DEN_LooseID", 15.1}},
         {"2017",                  {"NUM_LooseRelIso_DEN_LooseID", 15.1}},
@@ -182,7 +182,7 @@ const std::unordered_map<std::string, MuonSFConfig> muonSFConfigs = {
         {"2023PromptD",           {"NUM_LoosePFIso_DEN_LooseID",  15.1}},
         {"2024Prompt",            {"NUM_LoosePFIso_DEN_LooseID",  10.1}},
     }}},
-    {"weight_muon_iso_mediumid_tightiso", {{
+    {"_weight_muon_iso_mediumid_tightiso", {{
         {"2016preVFP",            {"NUM_TightRelIso_DEN_MediumID", 15.1}},
         {"2016postVFP",           {"NUM_TightRelIso_DEN_MediumID", 15.1}},
         {"2017",                  {"NUM_TightRelIso_DEN_MediumID", 15.1}},
@@ -193,7 +193,7 @@ const std::unordered_map<std::string, MuonSFConfig> muonSFConfigs = {
         {"2023PromptD",           {"NUM_TightPFIso_DEN_MediumID",  15.1}},
         {"2024Prompt",            {"NUM_TightPFIso_DEN_MediumID",  10.1}},
     }}},
-    {"weight_muon_iso_tightid_tightiso", {{
+    {"_weight_muon_iso_tightid_tightiso", {{
         {"2016preVFP",            {"NUM_TightRelIso_DEN_TightIDandIPCut", 15.1}},
         {"2016postVFP",           {"NUM_TightRelIso_DEN_TightIDandIPCut", 15.1}},
         {"2017",                  {"NUM_TightRelIso_DEN_TightIDandIPCut", 15.1}},
@@ -204,7 +204,7 @@ const std::unordered_map<std::string, MuonSFConfig> muonSFConfigs = {
         {"2023PromptD",           {"NUM_TightPFIso_DEN_TightID",          15.1}},
         {"2024Prompt",            {"NUM_TightPFIso_DEN_TightID",          10.1}},
     }}},
-    {"weight_muon_trigger", {{
+    {"_weight_muon_trigger", {{
         {"2016preVFP",            {"NUM_IsoMu24_or_IsoTkMu24_DEN_CutBasedIdTight_and_PFIsoTight",  30.0}},
         {"2016postVFP",           {"NUM_IsoMu24_or_IsoTkMu24_DEN_CutBasedIdTight_and_PFIsoTight",  30.0}},
         {"2017",                  {"NUM_IsoMu27_DEN_CutBasedIdTight_and_PFIsoTight",               30.0}},
@@ -275,13 +275,13 @@ const ElectronIDConfig electronID_tight = {
 };
 
 const std::unordered_map<std::string, std::vector<std::string>> electronWorkingPointSFs = {
-    {"weight_electron_reco_looseid", {
-        "weight_electron_reco",
-        "weight_electron_id_loose"
+    {"_weight_electron_reco_looseid", {
+        "_weight_electron_reco",
+        "_weight_electron_id_loose"
     }},
-    {"weight_electron_reco_tightid", {
-        "weight_electron_reco",
-        "weight_electron_id_tight"
+    {"_weight_electron_reco_tightid", {
+        "_weight_electron_reco",
+        "_weight_electron_id_tight"
     }}
 };
 
@@ -301,7 +301,7 @@ const std::unordered_map<std::string, std::string> electronTriggerScaleFactors_y
 };
 
 // New reco+ID WP machinery
-RNode applyElectronRecoScaleFactors(std::unordered_map<std::string, correction::CorrectionSet> cset_electron, RNode df, std::string output_name = "weight_electron_reco");
+RNode applyElectronRecoScaleFactors(std::unordered_map<std::string, correction::CorrectionSet> cset_electron, RNode df, std::string output_name = "_weight_electron_reco");
 RNode applyElectronIDScaleFactors(std::unordered_map<std::string, correction::CorrectionSet> cset_electron, ElectronIDConfig config, std::string output_name, RNode df);
 RNode combineElectronScaleFactorWeightsByKey(RNode df, std::string output_name, std::vector<std::string> input_keys);
 RNode applyElectronWorkingPointSFs(RNode df, bool isData, std::vector<std::string> wp_keys);

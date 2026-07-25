@@ -65,25 +65,25 @@ RNode lepSFWrapper(RNode df,
     if (include_trigger_sf) {
         // Apply trigger SFs if not already present
         auto colNames = df.GetColumnNames();
-        bool has_ele_trigger = std::find(colNames.begin(), colNames.end(), "weight_electrontrigger") != colNames.end();
-        bool has_mu_trigger = std::find(colNames.begin(), colNames.end(), "weight_muon_trigger") != colNames.end();
+        bool has_ele_trigger = std::find(colNames.begin(), colNames.end(), "_weight_electrontrigger") != colNames.end();
+        bool has_mu_trigger = std::find(colNames.begin(), colNames.end(), "_weight_muon_trigger") != colNames.end();
         
         if (!has_ele_trigger) {
             df = applyElectronTriggerScaleFactors(electronTriggerScaleFactors, electronTriggerScaleFactors_yearmap, df);
         }
         if (!has_mu_trigger) {
-            df= applyMuonScaleFactors(muonScaleFactors, "weight_muon_trigger", muonSFConfigs.at("weight_muon_trigger"), df);
+            df= applyMuonScaleFactors(muonScaleFactors, "_weight_muon_trigger", muonSFConfigs.at("_weight_muon_trigger"), df);
         }
         
         // Multiply base SFs by trigger SFs
         auto multiply_sf = [](const RVec<double>& base_sf, const RVec<double>& trig_sf) {
             return RVec<double>{ base_sf[0]*trig_sf[0], base_sf[1]*trig_sf[1], base_sf[2]*trig_sf[2] };
         };
-        df = df.Define(ele_output_name + "_ele_with_trigger", multiply_sf, {ele_sf_name, "weight_electrontrigger"});
-        df = df.Define(muo_output_name + "_muo_with_trigger", multiply_sf, {muo_sf_name, "weight_muon_trigger"});
-        
-        final_ele_sf = ele_output_name + "_ele_with_trigger";  // FIXED: use ele_output_name
-        final_muo_sf = muo_output_name + "_muo_with_trigger";
+        df = df.Define("_" + ele_output_name + "_ele_with_trigger", multiply_sf, {ele_sf_name, "_weight_electrontrigger"});
+        df = df.Define("_" + muo_output_name + "_muo_with_trigger", multiply_sf, {muo_sf_name, "_weight_muon_trigger"});
+
+        final_ele_sf = "_" + ele_output_name + "_ele_with_trigger";
+        final_muo_sf = "_" + muo_output_name + "_muo_with_trigger";
     }
 
     // Create the separate electron and muon SF outputs with custom names
@@ -304,11 +304,11 @@ RNode applyElectronWorkingPointSFs(RNode df, bool isData, std::vector<std::strin
     bool need_id_tight = false;
 
     for (const auto& wp_key : wp_keys) {
-        if (wp_key == "weight_electron_reco_looseid") {
+        if (wp_key == "_weight_electron_reco_looseid") {
             need_reco = true;
             need_id_loose = true;
         }
-        else if (wp_key == "weight_electron_reco_tightid") {
+        else if (wp_key == "_weight_electron_reco_tightid") {
             need_reco = true;
             need_id_tight = true;
         }
@@ -318,13 +318,13 @@ RNode applyElectronWorkingPointSFs(RNode df, bool isData, std::vector<std::strin
     }
 
     if (need_reco) {
-        df = applyElectronRecoScaleFactors(electronScaleFactors, df, "weight_electron_reco");
+        df = applyElectronRecoScaleFactors(electronScaleFactors, df, "_weight_electron_reco");
     }
     if (need_id_loose) {
-        df = applyElectronIDScaleFactors(electronScaleFactors, electronID_loose, "weight_electron_id_loose", df);
+        df = applyElectronIDScaleFactors(electronScaleFactors, electronID_loose, "_weight_electron_id_loose", df);
     }
     if (need_id_tight) {
-        df = applyElectronIDScaleFactors(electronScaleFactors, electronID_tight, "weight_electron_id_tight", df);
+        df = applyElectronIDScaleFactors(electronScaleFactors, electronID_tight, "_weight_electron_id_tight", df);
     }
 
     for (const auto& wp_key : wp_keys) {
@@ -362,7 +362,7 @@ RNode applyElectronTriggerScaleFactors(std::unordered_map<std::string, correctio
         }
         return electron_sf_weights;
     };
-    return df.Define("weight_electrontrigger", eval_correction, {"year", "electron_SC_eta", "electron_pt"});
+    return df.Define("_weight_electrontrigger", eval_correction, {"year", "electron_SC_eta", "electron_pt"});
 }
 
 /*
