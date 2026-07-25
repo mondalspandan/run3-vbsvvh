@@ -38,13 +38,14 @@ xsec_dict = {
             "DYto2E-2Jets_Bin-MLL-50_TuneCP5_13p6TeV": 2244.0,
             "DYto2Tau-2Jets_Bin-MLL-50_TuneCP5_13p6TeV": 2219.0,
 
-            #Used XSDB value multiplied by BR
-            "GluGluToContinto2Zto2E2Mu_TuneCP5_13p6TeV": 0.01384, # BR = 0.002264
-            "GluGlutoContinto2Zto4E_TuneCP5_13p6TeV": 0.00346, # BR = 0.001131
-            "GluGlutoContinto2Zto4Mu_TuneCP5_13p6TeV": 0.00406, # BR = 0.001133
-            "GluGlutoContinto2Zto4Tau_TuneCP5_13p6TeV": 0.00347, # BR = 0.00135
-            "GluGluToContinto2Zto2E2Tau_TuneCP5_13p6TeV": 0.01386, # BR = 0.002267
-            "GluGluToContinto2Zto2Mu2Tau_TuneCP5_13p6TeV": 0.01387, # BR = 0.002269
+            # new xsec values from HZZ, multiplied by 1.7 (original values in comments)
+            # https://github.com/CJLST/ZZAnalysis/blob/Run3/NanoAnalysis/test/prod/samplesNano_2024_MC.csv#L45
+            "GluGluToContinto2Zto2E2Mu_TuneCP5_13p6TeV": 0.01061067, # 0.00624157 from HZZ * 1.7
+            "GluGlutoContinto2Zto4E_TuneCP5_13p6TeV": 0.00516078, # 0.00303575 from HZZ * 1.7
+            "GluGlutoContinto2Zto4Mu_TuneCP5_13p6TeV": 0.00516078, # 0.00303575 from HZZ * 1.7
+            "GluGlutoContinto2Zto4Tau_TuneCP5_13p6TeV": 0.00516078, # 0.00303575 from HZZ * 1.7
+            "GluGluToContinto2Zto2E2Tau_TuneCP5_13p6TeV": 0.01061067, # 0.00624157 from HZZ * 1.7
+            "GluGluToContinto2Zto2Mu2Tau_TuneCP5_13p6TeV": 0.01061067, # 0.00624157 from HZZ * 1.7
             
             # QCD-HT (obtained by Cristina manually with genXsecAnalyzer) - Cristina Mantilla Suarez at Virginia (see comment from Lara in issue #45)
             "QCD-4Jets_Bin-HT-40to70_TuneCP5_13p6TeV": 311600000.0,
@@ -305,7 +306,6 @@ xsec_dict = {
             "ZH_HToBB_ZToLL_M-125_TuneCP5_13TeV"                       : 0.0262749,
             "ZZJJTo4L_TuneCP5_13TeV"                                   : 0.00884,
             "ZZTo2L2Nu_TuneCP5_13TeV"                                  : 0.564,
-            "ZZTo4L_M-1toInf_TuneCP5_13TeV"                            : 1.256,
             "ggZH_HToBB_ZToLL_M-125_TuneCP5_13TeV"                     : 0.0024614,
             "ZZJJTo4L_EWKnotop_TuneCP5_13TeV"                          : 0.00884, 
             # for numbers below we use averages
@@ -370,6 +370,8 @@ xsec_dict = {
             "WJetsToLNu_TuneCP5_13TeV"                                 : 66680.0,
             "WWTo4Q_4f_TuneCP5_13TeV"                                  : 51.03,
             "WZTo1L1Nu2Q_4f_TuneCP5_13TeV"                             : 9.119,
+            "ZZTo4L_M-1toInf_TuneCP5_13TeV"                            : 13.74, # https://xsecdb-xsdb-official.app.cern.ch/xsdb/?columns=50331648&currentPage=0&pageSize=50&searchQuery=process_name%3DZTo4L_M-1toInf_TuneCP5_13TeV%20%2A
+
             #-----------------------------------------------------------------------------
 
             # From twiki https://twiki.cern.ch/twiki/bin/view/LHCPhysics/LHCHWGGGF_RUN2 and using BR:0.000267

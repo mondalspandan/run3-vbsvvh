@@ -37,7 +37,7 @@ RNode applyPileupScaleFactors(std::unordered_map<std::string, correction::Correc
         pileup_weights.push_back(correctionset->evaluate({ntrueint, "down"}));
         return pileup_weights;
     };
-    return df.Define("weight_pileup", eval_correction, {"year", "Pileup_nTrueInt"});
+    return df.Define("weightsyst_pileup", eval_correction, {"year", "Pileup_nTrueInt"});
 }
 
 /*
@@ -491,8 +491,8 @@ RNode applyBTaggingScaleFactors(std::unordered_map<std::string, correction::Corr
         return calc_btag_sf(year, eta, pt, jetflavor, corrname_it->second, false);
     };
 
-    // return df.Define("weight_btagging_sf_HF", eval_HF, {"year", "GnTBJet_eta", "GnTBJet_pt", "GnTBJet_hadronFlavour"})
-            //  .Define("weight_btagging_sf_LF", eval_LF, {"year", "GnTBJet_eta", "GnTBJet_pt", "GnTBJet_hadronFlavour"});
+    // return df.Define("weightsyst_btagging_sf_HF", eval_HF, {"year", "GnTBJet_eta", "GnTBJet_pt", "GnTBJet_hadronFlavour"})
+            //  .Define("weightsyst_btagging_sf_LF", eval_LF, {"year", "GnTBJet_eta", "GnTBJet_pt", "GnTBJet_hadronFlavour"});
     return df;
 }
 
@@ -543,44 +543,49 @@ RNode applyEWKCorrections(correction::CorrectionSet cset_ewk, RNode df){
             else return 1.;
         }
     };
-    return df.Define("weight_ewk", eval_correction, {"LHEPart_pt", "LHEPart_eta", "LHEPart_phi", "LHEPart_mass", "LHEPart_pdgId", "do_ewk_corr"});
+    return df.Define("ewkweight", eval_correction, {"LHEPart_pt", "LHEPart_eta", "LHEPart_phi", "LHEPart_mass", "LHEPart_pdgId", "do_ewk_corr"});
 }
 
 RNode applyL1PreFiringReweighting(RNode df){
+    // L1PreFiringWeight_* branches are only present in Run 2 NanoAOD; the
+    // correction does not apply to Run 3, so emit a unit weight there.
+    auto colNames = df.GetColumnNames();
+    bool hasL1Prefire = std::find(colNames.begin(), colNames.end(), std::string("L1PreFiringWeight_Nom")) != colNames.end();
+    if (!hasL1Prefire) {
+        return df.Define("weightsyst_l1prefiring", [] () { return RVec<float>{1.f, 1.f, 1.f}; }, {});
+    }
     auto eval_correction = [] (float L1prefire, float L1prefireup, float L1prefiredown) {
         return RVec<float>{L1prefire, L1prefireup, L1prefiredown};
     };
-    // TODO: check what this is in v15
-    // return df.Define("weight_l1prefiring", eval_correction, {"L1PreFiringWeight_Nom", "L1PreFiringWeight_Up", "L1PreFiringWeight_Dn"});
-    return df;
+    return df.Define("weightsyst_l1prefiring", eval_correction, {"L1PreFiringWeight_Nom", "L1PreFiringWeight_Up", "L1PreFiringWeight_Dn"});
 }
 
 RNode applyPSWeight_FSR(RNode df) {
     auto eval_correction = [] (const RVec<float> PSWeight) {
         return RVec<float>{1., PSWeight[1], PSWeight[3]};
     };
-    return df.Define("weight_PSFSR", eval_correction, {"PSWeight"});
+    return df.Define("weightsyst_PSFSR", eval_correction, {"PSWeight"});
 }
 
 RNode applyPSWeight_ISR(RNode df) {
     auto eval_correction = [] (const RVec<float> PSWeight) {
         return RVec<float>{1., PSWeight[0], PSWeight[2]};
     };
-    return df.Define("weight_PSISR", eval_correction, {"PSWeight"});
+    return df.Define("weightsyst_PSISR", eval_correction, {"PSWeight"});
 }
 
 RNode applyLHEScaleWeight_muF(RNode df) {
     auto eval_correction = [] (const RVec<float> LHEScaleWeight) {
         return RVec<float>{1., LHEScaleWeight[5], LHEScaleWeight[3]};
     };
-    return df.Define("weight_muF", eval_correction, {"LHEScaleWeight"});
+    return df.Define("weightsyst_muF", eval_correction, {"LHEScaleWeight"});
 }
 
 RNode applyLHEScaleWeight_muR(RNode df) {
     auto eval_correction = [] (const RVec<float> LHEScaleWeight) {
         return RVec<float>{1., LHEScaleWeight[7], LHEScaleWeight[1]};
     };
-    return df.Define("weight_muR", eval_correction, {"LHEScaleWeight"});
+    return df.Define("weightsyst_muR", eval_correction, {"LHEScaleWeight"});
 }
 
 RNode applyDataWeights(RNode df_) {
@@ -603,7 +608,7 @@ RNode applyMCWeights(RNode df_) {
     if (hasLHEPart) {
         df = applyEWKCorrections(cset_ewk, df);
     } else {
-        df = df.Define("weight_ewk", [] () { return 1.; }, {});
+        df = df.Define("ewkweight", [] () { return 1.; }, {});
     }
 
     df = applyL1PreFiringReweighting(df);
@@ -614,25 +619,19 @@ RNode applyMCWeights(RNode df_) {
         df = applyLHEScaleWeight_muF(df);
         df = applyLHEScaleWeight_muR(df);
     } else {
-        df = df.Define("weight_muF", [] () { return RVec<float>{1.f, 1.f, 1.f}; }, {});
-        df = df.Define("weight_muR", [] () { return RVec<float>{1.f, 1.f, 1.f}; }, {});
+        df = df.Define("weightsyst_muF", [] () { return RVec<float>{1.f, 1.f, 1.f}; }, {});
+        df = df.Define("weightsyst_muR", [] () { return RVec<float>{1.f, 1.f, 1.f}; }, {});
     }
 
     return df.Redefine("weight",
         "weight *"
-        "weight_pileup[0] * "
-        //"weight_muon_id[0] * "
-        //"weight_muon_reco[0] * "
-        //"weight_muon_trigger[0] * "
-        //"weight_electronid[0] * "
-        //"weight_electronreco[0] * "
-        //"weight_electrontrigger[0] * "
-        // "weight_btagging_sf_HF[0] * "
-        // "weight_btagging_sf_LF[0] * "
-        "weight_ewk * "
-        // "weight_l1prefiring[0] * "
-        "weight_PSISR[0] * "
-        "weight_PSFSR[0] * "
-        "weight_muF[0] * "
-        "weight_muR[0]");
+        "weightsyst_pileup[0] * "
+        // "weightsyst_btagging_sf_HF[0] * "
+        // "weightsyst_btagging_sf_LF[0] * "
+        "ewkweight * "
+        "weightsyst_l1prefiring[0] * "
+        "weightsyst_PSISR[0] * "
+        "weightsyst_PSFSR[0] * "
+        "weightsyst_muF[0] * "
+        "weightsyst_muR[0]");
 }

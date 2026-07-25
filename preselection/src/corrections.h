@@ -3,20 +3,30 @@
 
 #pragma once
 
-#include <unordered_map>
 #include <string>
-#include <iostream>
+#include <unordered_map>
+#include <vector>
 
 #include "ROOT/RDataFrame.hxx"
 #include "ROOT/RDFHelpers.hxx"
 #include "ROOT/RVec.hxx"
 
 #include "correction.h"
-#include "TRandom3.h"
 
 using correction::CorrectionSet;
 using RNode = ROOT::RDF::RNode;
 using ROOT::VecOps::RVec;
+
+/*
+############################################
+CORRECTION DATA REGISTRY
+############################################
+
+All correctionlib payloads (CorrectionSet::from_file) and the era-keyed
+tag/name tables live in corrections.cpp — see the CORRECTION-SET REGISTRY
+section there. Single definition point, loaded lazily on first use.
+To add or re-pin an era, edit the JERC era table in corrections.cpp.
+*/
 
 /*
 ############################################
@@ -27,194 +37,129 @@ RVec<bool> isbTagLoose(std::string year, RVec<float> btag_score);
 RVec<bool> isbTagMedium(std::string year, RVec<float> btag_score);
 RVec<bool> isbTagTight(std::string year, RVec<float> btag_score);
 
-
-const std::unordered_map <std::string, correction::CorrectionSet> btaggingCorrections = {
-    {"2016preVFP", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/BTV/Run2-2016preVFP-UL-NanoAODv15/latest/btagging.json.gz")},
-    {"2016postVFP", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/BTV/Run2-2016postVFP-UL-NanoAODv15/latest/btagging.json.gz")},
-    {"2017", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/BTV/Run2-2017-UL-NanoAODv15/latest/btagging.json.gz")},
-    {"2018", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/BTV/Run2-2018-UL-NanoAODv15/latest/btagging.json.gz")},
-    {"2022Re-recoBCD", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/BTV/Run3-24CDEReprocessingFGHIPrompt-Summer24-NanoAODv15/latest/btagging.json.gz")},
-    {"2022Re-recoE+PromptFG", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/BTV/Run3-24CDEReprocessingFGHIPrompt-Summer24-NanoAODv15/latest/btagging.json.gz")},
-    {"2023PromptC", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/BTV/Run3-24CDEReprocessingFGHIPrompt-Summer24-NanoAODv15/latest/btagging.json.gz")},
-    {"2023PromptD", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/BTV/Run3-24CDEReprocessingFGHIPrompt-Summer24-NanoAODv15/latest/btagging.json.gz")},
-    {"2024Prompt", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/BTV/Run3-24CDEReprocessingFGHIPrompt-Summer24-NanoAODv15/latest/btagging.json.gz")},
-    // Recomendation from: https://btv-wiki.docs.cern.ch/ScaleFactors/Run3Prompt25/
-    {"2025", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/BTV/Run3-25Prompt-Summer24-NanoAODv15/latest/btagging.json.gz")}
-};
-
-// 2. Map of Numbers: Put the actual numeric thresholds here
-static std::unordered_map<std::string, float> btaggingWPMap_Loose = {
-    {"2016preVFP",  btaggingCorrections.at("2016preVFP").at("UParTAK4_wp_values")->evaluate({"L"})}, 
-    {"2016postVFP", btaggingCorrections.at("2016postVFP").at("UParTAK4_wp_values")->evaluate({"L"})},
-    {"2017",        btaggingCorrections.at("2017").at("UParTAK4_wp_values")->evaluate({"L"})},
-    {"2018",        btaggingCorrections.at("2018").at("UParTAK4_wp_values")->evaluate({"L"})},
-    {"2022Re-recoBCD", btaggingCorrections.at("2022Re-recoBCD").at("UParTAK4_wp_values")->evaluate({"L"})},
-    {"2022Re-recoE+PromptFG", btaggingCorrections.at("2022Re-recoE+PromptFG").at("UParTAK4_wp_values")->evaluate({"L"})},
-    {"2023PromptC", btaggingCorrections.at("2023PromptC").at("UParTAK4_wp_values")->evaluate({"L"})},
-    {"2023PromptD", btaggingCorrections.at("2023PromptD").at("UParTAK4_wp_values")->evaluate({"L"})},
-    {"2024Prompt",  btaggingCorrections.at("2024Prompt").at("UParTAK4_wp_values")->evaluate({"L"})},
-    {"2025",        btaggingCorrections.at("2025").at("UParTAK4_wp_values")->evaluate({"L"})}
-};
-
-static std::unordered_map<std::string, float> btaggingWPMap_Medium = {
-    {"2016preVFP",  btaggingCorrections.at("2016preVFP").at("UParTAK4_wp_values")->evaluate({"M"})},
-    {"2016postVFP", btaggingCorrections.at("2016postVFP").at("UParTAK4_wp_values")->evaluate({"M"})},
-    {"2017",        btaggingCorrections.at("2017").at("UParTAK4_wp_values")->evaluate({"M"})},
-    {"2018",        btaggingCorrections.at("2018").at("UParTAK4_wp_values")->evaluate({"M"})},
-    {"2022Re-recoBCD", btaggingCorrections.at("2022Re-recoBCD").at("UParTAK4_wp_values")->evaluate({"M"})},
-    {"2022Re-recoE+PromptFG", btaggingCorrections.at("2022Re-recoE+PromptFG").at("UParTAK4_wp_values")->evaluate({"M"})},
-    {"2023PromptC", btaggingCorrections.at("2023PromptC").at("UParTAK4_wp_values")->evaluate({"M"})},
-    {"2023PromptD", btaggingCorrections.at("2023PromptD").at("UParTAK4_wp_values")->evaluate({"M"})},
-    {"2024Prompt",  btaggingCorrections.at("2024Prompt").at("UParTAK4_wp_values")->evaluate({"M"})},
-    {"2025",        btaggingCorrections.at("2025").at("UParTAK4_wp_values")->evaluate({"M"})}
-};
-
-static std::unordered_map<std::string, float> btaggingWPMap_Tight = {
-    {"2016preVFP",  btaggingCorrections.at("2016preVFP").at("UParTAK4_wp_values")->evaluate({"T"})},
-    {"2016postVFP", btaggingCorrections.at("2016postVFP").at("UParTAK4_wp_values")->evaluate({"T"})},
-    {"2017",        btaggingCorrections.at("2017").at("UParTAK4_wp_values")->evaluate({"T"})},
-    {"2018",        btaggingCorrections.at("2018").at("UParTAK4_wp_values")->evaluate({"T"})},
-    {"2022Re-recoBCD", btaggingCorrections.at("2022Re-recoBCD").at("UParTAK4_wp_values")->evaluate({"T"})},
-    {"2022Re-recoE+PromptFG", btaggingCorrections.at("2022Re-recoE+PromptFG").at("UParTAK4_wp_values")->evaluate({"T"})},
-    {"2023PromptC", btaggingCorrections.at("2023PromptC").at("UParTAK4_wp_values")->evaluate({"T"})},
-    {"2023PromptD", btaggingCorrections.at("2023PromptD").at("UParTAK4_wp_values")->evaluate({"T"})},
-    {"2024Prompt",  btaggingCorrections.at("2024Prompt").at("UParTAK4_wp_values")->evaluate({"T"})},
-    {"2025",        btaggingCorrections.at("2025").at("UParTAK4_wp_values")->evaluate({"T"})}
-};
-
 /*
 ############################################
 MET CORRECTIONS
 ############################################
 */
-const std::unordered_map<std::string, correction::CorrectionSet> metCorrections = {
-    {"2016preVFP", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run2-2016preVFP-UL-NanoAODv9/latest/met.json.gz")},
-    {"2016postVFP", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run2-2016postVFP-UL-NanoAODv9/latest/met.json.gz")},
-    {"2017", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run2-2017-UL-NanoAODv9/latest/met.json.gz")},
-    {"2018", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run2-2018-UL-NanoAODv9/latest/met.json.gz")},
-    // {"2022Re-recoBCD", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run3-22CDSep23-Summer22-NanoAODv12/latest/met_xyCorrections_2022_2022.json.gz")},
-    // {"2022Re-recoE+PromptFG", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run3-22EFGSep23-Summer22EE-NanoAODv12/latest/met_xyCorrections_2022_2022EE.json.gz")},
-    // {"2023PromptC", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run3-23CSep23-Summer23-NanoAODv12/latest/met_xyCorrections_2023_2023.json.gz")},
-    // {"2023PromptD", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run3-23DSep23-Summer23BPix-NanoAODv12/latest/met_xyCorrections_2023_2023BPix.json.gz")}
-};
 RNode applyMETPhiCorrections(RNode df, bool isData);
 RNode applyMETUnclusteredCorrections(RNode df, std::string variation);
 
 /*
 ############################################
-JET MASS SCALE AND RESOLUTION CORRECTIONS
+JET MASS SCALE (JMS) AND RESOLUTION (JMR) — generic, per-mass-column
 ############################################
+
+Convention:
+  - JMS  : *additive* shift on the target mass column, in GeV. Central = 0.0 GeV.
+  - JMR  : *multiplicative* width factor wrt the gen reference mass. Central = 1.0.
+
+applyJetMassScale / applyJetMassResolution (corrections.cpp) are column-agnostic — the
+mass branch and (for JMR) the gen mass + gen-index branches are passed in. This
+analysis intends to calibrate on the GloParT regressed mass, not FatJet_msoftdrop
+(see CORRECTIONS.md § 5-6), and the calibration is not yet derived — the helpers
+are currently unwired in applyMCCorrections. Identity-valued placeholder maps
+(a template for the future calibration) live in corrections.cpp.
 */
-const std::unordered_map<std::string, correction::CorrectionSet> jetMassCorrections = {
-    {"2016preVFP", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run2-2016preVFP-UL-NanoAODv9/latest/jmar.json.gz")},
-    {"2016postVFP", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run2-2016postVFP-UL-NanoAODv9/latest/jmar.json.gz")},
-    {"2017", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run2-2017-UL-NanoAODv9/latest/jmar.json.gz")},
-    {"2018", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run2-2018-UL-NanoAODv9/latest/jmar.json.gz")}
-};
-RNode applyJMSCorrections(std::unordered_map<std::string, correction::CorrectionSet> cset_jms, RNode df, std::string variation);
-RNode applyJMRCorrections(std::unordered_map<std::string, correction::CorrectionSet> cset_jmr, RNode df, std::string variation);
+RNode applyJetMassScale(const std::unordered_map<std::string, float>& shift_map,
+                     const std::string& mass_col, RNode df);
+RNode applyJetMassResolution(const std::unordered_map<std::string, float>& factor_map,
+                          const std::unordered_map<std::string, float>& sigma_rel_map,
+                          const std::string& mass_col,
+                          const std::string& gen_mass_col,
+                          const std::string& gen_idx_col,
+                          RNode df);
 
 /*
 ############################################
 JET ENERGY CORRECTIONS
 ############################################
+
+The pinned correction files and per-era JEC/JER tag strings are defined by the
+JERC era table in corrections.cpp (see the pinning rationale documented there).
 */
-const std::unordered_map<std::string, correction::CorrectionSet> jetEnergyCorrections = {
-    {"2016preVFP", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run2-2016preVFP-UL-NanoAODv9/latest/jet_jerc.json.gz")},
-    {"2016postVFP", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run2-2016postVFP-UL-NanoAODv9/latest/jet_jerc.json.gz")},
-    {"2017", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run2-2017-UL-NanoAODv9/latest/jet_jerc.json.gz")},
-    {"2018", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run2-2018-UL-NanoAODv9/latest/jet_jerc.json.gz")},
-    {"2022Re-recoBCD", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run3-22CDSep23-Summer22-NanoAODv12/latest/jet_jerc.json.gz")},
-    {"2022Re-recoE+PromptFG", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run3-22EFGSep23-Summer22EE-NanoAODv12/latest/jet_jerc.json.gz")},
-    {"2023PromptC", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run3-23CSep23-Summer23-NanoAODv12/latest/jet_jerc.json.gz")},
-    {"2023PromptD", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run3-23DSep23-Summer23BPix-NanoAODv12/latest/jet_jerc.json.gz")},
-    {"2024Prompt", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run3-24CDEReprocessingFGHIPrompt-Summer24-NanoAODv15/latest/jet_jerc.json.gz")}
-};
 
-const std::unordered_map<std::string, correction::CorrectionSet> jetEnergyResolution_smear = {
-    {"jer_smear", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/JER-Smearing/latest/jer_smear.json.gz")}
-};
+// Full Type-1 PuppiMET rebuild from RawPuppiMET over the merged AK4 list (Jet + CorrT1METJet)
+// with muon subtraction, per the JERC recipe. Writes met_pt / met_phi (nominal) and, on MC with
+// systematics enabled, met_pt_<sfx> / met_phi_<sfx> for each JES variation. Must run AFTER
+// applyJetEnergyCorrections / applyJetEnergyResolution / applyJESVariations (it consumes
+// Jet_jerFactor and the _Jet_var_<sfx> columns and re-evaluates the JEC compound) and after
+// _Jet_rawpt = (1-Jet_rawFactor)*Jet_pt has been defined on the pristine NanoAOD jets.
+RNode applyType1MET(RNode df, bool isData);
 
-const std::unordered_map<std::string, std::string> jetEnergyCorrections_JEC_prefix = {
-    {"2016preVFP", "Summer19UL16APV_V7_MC"},
-    {"2016postVFP", "Summer19UL16_V7_MC"},
-    {"2017", "Summer19UL17_V5_MC"},
-    {"2018", "Summer19UL18_V5_MC"},
-    {"2022Re-recoBCD", "Summer22_22Sep2023_V2_MC"},
-    {"2022Re-recoE+PromptFG", "Summer22EE_22Sep2023_V2_MC"},
-    {"2023PromptC", "Summer23Prompt23_V1_MC"},
-    {"2023PromptD", "Summer23BPixPrompt23_V1_MC"},
-    {"2024Prompt", "Summer24Prompt24_V1_MC"}
-};
+// Nominal JEC: removes the JEC stored in NanoAOD (via Jet_rawFactor) and re-applies the
+// latest L1FastJet * L2Relative * L3Absolute (* L2L3Residual for data) compound from
+// jet_jerc.json.gz. MET is NOT propagated here — it is rebuilt in applyType1MET.
+RNode applyJetEnergyCorrections(const std::unordered_map<std::string, correction::CorrectionSet>& cset_jerc,
+                                const std::unordered_map<std::string, std::string>& jec_prefix_map,
+                                const std::unordered_map<std::string, std::string>& jec_suffix_map,
+                                RNode df, bool isData);
 
-const std::unordered_map<std::string, std::string> jetEnergyCorrections_JEC_suffix = {
-    {"2016preVFP", "AK4PFchs"},
-    {"2016postVFP", "AK4PFchs"},
-    {"2017", "AK4PFchs"},
-    {"2018", "AK4PFchs"},
-    {"2022Re-recoBCD", "AK4PFPuppi"},
-    {"2022Re-recoE+PromptFG", "AK4PFPuppi"},
-    {"2023PromptC", "AK4PFPuppi"},
-    {"2023PromptD", "AK4PFPuppi"},
-    {"2024Prompt", "AK4PFPuppi"}
-};
+// JES uncertainty driver — per-source, suffixed-branch output, official JERC ordering:
+// the shift (1 ± u) is applied to the JEC (PRE-smearing) pt, and JER is re-evaluated on
+// the shifted pt with the same event seed as the nominal smearing. Must run after the
+// nominal applyJet/FatJetEnergyCorrections + apply*EnergyResolution (it consumes their
+// pre-smear snapshot columns). Emits all 11 Regrouped V2 sources × {Up, Dn} = 22
+// variations on AK4 + AK8, correlated between the two algorithms (same sources/tags).
+//
+// Writes Jet_pt_<suffix>, Jet_mass_<suffix> and the per-jet full variation factor
+// _Jet_var_<suffix> (consumed by applyType1MET for the per-variation MET), plus
+// FatJet_pt_<suffix>, FatJet_mass_<suffix> (NOT FatJet_msoftdrop — that has its own JEC
+// recipe; no MET propagation from AK8 because Type-I MET is built from AK4 only).
+//
+// <suffix> = "jes" + column_label + direction, e.g. "jesAbsoluteUp", "jesAbsoluteYearDn".
+RNode applyJESVariations(RNode df);
 
-const std::unordered_map<std::string, std::string> jetEnergyResolution_JER_res_name = {
-    {"2016preVFP", "Summer20UL16APV_JRV3_MC_PtResolution_AK4PFchs"},
-    {"2016postVFP", "Summer20UL16_JRV3_MC_PtResolution_AK4PFchs"},
-    {"2017", "Summer19UL17_JRV2_MC_PtResolution_AK4PFchs"},
-    {"2018", "Summer19UL18_JRV2_MC_PtResolution_AK4PFchs"},
-    {"2022Re-recoBCD", "Summer22_22Sep2023_JRV1_MC_PtResolution_AK4PFPuppi"},
-    {"2022Re-recoE+PromptFG", "Summer22EE_22Sep2023_JRV1_MC_PtResolution_AK4PFPuppi"},
-    {"2023PromptC", "Summer23Prompt23_JRV1_MC_PtResolution_AK4PFPuppi"},
-    {"2023PromptD", "Summer23BPixPrompt23_JRV1_MC_PtResolution_AK4PFPuppi"},
-    {"2024Prompt", "Summer24Prompt24_JRV1_MC_PtResolution_AK4PFPuppi"}
-};
+// When called with false before any analysis, disables all JES/JER variation branches
+// (the suffix accessors below return empty, applyJESVariations becomes a no-op). Use
+// --no_systs to activate nominal-only mode.
+void setStoreSysts(bool v);
 
-const std::unordered_map<std::string, std::string> jetEnergyResolution_JER_sf_name = {
-    {"2016preVFP", "Summer20UL16APV_JRV3_MC_ScaleFactor_AK4PFchs"},
-    {"2016postVFP", "Summer20UL16_JRV3_MC_ScaleFactor_AK4PFchs"},
-    {"2017", "Summer19UL17_JRV2_MC_ScaleFactor_AK4PFchs"},
-    {"2018", "Summer19UL18_JRV2_MC_ScaleFactor_AK4PFchs"},
-    {"2022Re-recoBCD", "Summer22_22Sep2023_JRV1_MC_ScaleFactor_AK4PFPuppi"},
-    {"2022Re-recoE+PromptFG", "Summer22EE_22Sep2023_JRV1_MC_ScaleFactor_AK4PFPuppi"},
-    {"2023PromptC", "Summer23Prompt23_JRV1_MC_ScaleFactor_AK4PFPuppi"},
-    {"2023PromptD", "Summer23BPixPrompt23_JRV1_MC_ScaleFactor_AK4PFPuppi"},
-    {"2024Prompt", "Summer24Prompt24_JRV1_MC_ScaleFactor_AK4PFPuppi"}
-};
+// Public accessors for the variation suffixes. All return empty when
+// setStoreSysts(false) has been called.
+//   jesVariationSuffixes:       the 22 JES suffixes ("jesAbsoluteUp", ..., "jesRelativeSampleYearDn")
+//   jerVariationSuffixes:       {"jerUp", "jerDn"}
+//   kinematicVariationSuffixes: JES + JER combined — the full list of suffixes for which
+//                               <collection>_pt_<sfx>/_mass_<sfx> (+ met_pt_<sfx>) may exist.
+//                               Consumers building per-variation selections should loop over
+//                               this and check column presence (variations are produced on MC
+//                               only today, and only by the correction steps that ran).
+std::vector<std::string> jesVariationSuffixes();
+std::vector<std::string> jerVariationSuffixes();
+std::vector<std::string> kinematicVariationSuffixes();
 
-RNode applyJetEnergyCorrections(std::unordered_map<std::string, correction::CorrectionSet> cset_jerc, std::unordered_map<std::string, std::string> jec_prefix_map, std::unordered_map<std::string, std::string> jec_suffix_map, RNode df, std::string JEC_type, std::string variation);
-RNode applyJetEnergyResolution(std::unordered_map<std::string, correction::CorrectionSet> cset_jerc, std::unordered_map<std::string, correction::CorrectionSet> cset_jer_smear, std::unordered_map<std::string, std::string> jer_res_map, std::unordered_map<std::string, std::string> jer_sf_map, RNode df, std::string variation);
+// JER hybrid smearing (MC only). Defines Jet_jerFactor and redefines Jet_pt/Jet_mass to the
+// nominal-smeared values. With storeVariations, also writes the ±1σ SF variation branches
+// Jet_jerFactor_jerUp/Dn and Jet_pt/mass_jerUp/Dn (from the same pre-smear baseline, same
+// stochastic seed → fully correlated with the nominal). The ±1σ SF is ScaleFactor ±
+// SFUncertainty (split-tag format; the pinned ScaleFactor has no `systematic` axis).
+// All factors are consumed by applyType1MET for the MET rebuild.
+RNode applyJetEnergyResolution(const std::unordered_map<std::string, correction::CorrectionSet>& cset_jerc,
+                               const std::unordered_map<std::string, correction::CorrectionSet>& cset_jer_smear,
+                               const std::unordered_map<std::string, std::string>& jer_res_map,
+                               const std::unordered_map<std::string, std::string>& jer_sf_map,
+                               const std::unordered_map<std::string, std::string>& jer_unc_map,
+                               RNode df, bool storeVariations);
+
+// AK8 (FatJet_*) variants — same recipe as AK4 but reading FatJet_* / GenJetAK8_* branches
+// and the AK8PFPuppi compound from fatJet_jerc.json.gz.
+RNode applyFatJetEnergyCorrections(const std::unordered_map<std::string, correction::CorrectionSet>& cset_jerc,
+                                   const std::unordered_map<std::string, std::string>& jec_prefix_map,
+                                   const std::unordered_map<std::string, std::string>& jec_suffix_map,
+                                   RNode df, bool isData);
+
+RNode applyFatJetEnergyResolution(const std::unordered_map<std::string, correction::CorrectionSet>& cset_jerc,
+                                  const std::unordered_map<std::string, correction::CorrectionSet>& cset_jer_smear,
+                                  const std::unordered_map<std::string, std::string>& jer_res_map,
+                                  const std::unordered_map<std::string, std::string>& jer_sf_map,
+                                  const std::unordered_map<std::string, std::string>& jer_unc_map,
+                                  RNode df, bool storeVariations);
 
 /*
 ############################################
 JET VETO MAPS
 ############################################
 */
-const std::unordered_map<std::string, correction::CorrectionSet> jetVetoMaps = {
-    {"2016preVFP", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run2-2016preVFP-UL-NanoAODv9/latest/jetvetomaps.json.gz")},
-    {"2016postVFP", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run2-2016postVFP-UL-NanoAODv9/latest/jetvetomaps.json.gz")},
-    {"2017", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run2-2017-UL-NanoAODv9/latest/jetvetomaps.json.gz")},
-    {"2018", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run2-2018-UL-NanoAODv9/latest/jetvetomaps.json.gz")},
-    {"2022Re-recoBCD", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run3-22CDSep23-Summer22-NanoAODv12/latest/jetvetomaps.json.gz")},
-    {"2022Re-recoE+PromptFG", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run3-22EFGSep23-Summer22EE-NanoAODv12/latest/jetvetomaps.json.gz")},
-    {"2023PromptC", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run3-23CSep23-Summer23-NanoAODv12/latest/jetvetomaps.json.gz")},
-    {"2023PromptD", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run3-23DSep23-Summer23BPix-NanoAODv12/latest/jetvetomaps.json.gz")},
-    {"2024Prompt", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run3-24CDEReprocessingFGHIPrompt-Summer24-NanoAODv15/latest/jetvetomaps.json.gz")}
-};
-
-const std::unordered_map<std::string, std::string> jetVetoMap_names = {
-    {"2016preVFP", "Summer19UL16_V1"},
-    {"2016postVFP", "Summer19UL16_V1"},
-    {"2017", "Summer19UL17_V1"},
-    {"2018", "Summer19UL18_V1"},
-    {"2022Re-recoBCD", "Summer22_23Sep2023_RunCD_V1"},
-    {"2022Re-recoE+PromptFG", "Summer22EE_23Sep2023_RunEFG_V1"},
-    {"2023PromptC", "Summer23Prompt23_RunC_V1"},
-    {"2023PromptD", "Summer23BPixPrompt23_RunD_V1"},
-    {"2024Prompt", "Summer24Prompt24_RunBCDEFGHI_V1"}
-};
-
 RNode applyJetVetoMaps(RNode df);
 
 /*
@@ -222,18 +167,6 @@ RNode applyJetVetoMaps(RNode df);
 ELECTRON SCALE AND SMEARING CORRECTIONS
 ############################################
 */
-const std::unordered_map<std::string, correction::CorrectionSet> electronSSCorrections = {
-    {"2016preVFP", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/EGM/Run2-2016preVFP-UL-NanoAODv15/latest/electronSS_EtDependent.json.gz")},
-    {"2016postVFP", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/EGM/Run2-2016postVFP-UL-NanoAODv15/latest/electronSS_EtDependent.json.gz")},
-    {"2017", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/EGM/Run2-2017-UL-NanoAODv15/latest/electronSS_EtDependent.json.gz")},
-    {"2018", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/EGM/Run2-2018-UL-NanoAODv15/latest/electronSS_EtDependent.json.gz")},
-    {"2022Re-recoBCD", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/EGM/Run3-22CDSep23-Summer22-NanoAODv12/latest/electronSS_EtDependent.json.gz")},
-    {"2022Re-recoE+PromptFG", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/EGM/Run3-22EFGSep23-Summer22EE-NanoAODv12/latest/electronSS_EtDependent.json.gz")},
-    {"2023PromptC", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/EGM/Run3-23CSep23-Summer23-NanoAODv12/latest/electronSS_EtDependent.json.gz")},
-    {"2023PromptD", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/EGM/Run3-23DSep23-Summer23BPix-NanoAODv12/latest/electronSS_EtDependent.json.gz")},
-    {"2024Prompt", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/EGM/Run3-24CDEReprocessingFGHIPrompt-Summer24-NanoAODv15/latest/electronSS_EtDependent.json.gz")}
-};
-
 RNode applyElectronScaleAndSmearing(RNode df, bool isData);
 
 /*
