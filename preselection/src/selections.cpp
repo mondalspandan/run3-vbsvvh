@@ -40,7 +40,7 @@ inline std::vector<std::string> activeKinVariations(RNode df) {
 
 // Per-variation channel-pass-flag generation. Each channel filter that depends on a
 // jet-multiplicity cut emits a boolean per event for each variation v ∈ {nom} ∪
-// activeKinVariations() — passes_<channel>_<v> — then the channel filter is OR over
+// activeKinVariations() - passes_<channel>_<v> - then the channel filter is OR over
 // those flags. This keeps events that pass the channel under ANY variation, which is
 // the only way a single output file can carry per-variation histograms downstream.
 //
@@ -304,7 +304,7 @@ RNode AK8JetsSelection(RNode df_)
     df = applyObjectMaskNewAffix(df, "_good_ak8jets", "FatJet", "fatjet");
     df = df.Define("ht_fatjets", "Sum(fatjet_pt)");
 
-    // Nominal good-fat-jet mask — defined AFTER applyObjectMaskNewAffix so it is not
+    // Nominal good-fat-jet mask - defined AFTER applyObjectMaskNewAffix so it is not
     // aliased into fatjet_isGood. FatJet_isGood (nominal) mirrors the per-variation
     // FatJet_isGood_<sfx> branches; coffea uses them uniformly. The nominal count is
     // already available as "nfatjet" (from applyObjectMaskNewAffix above), matching the
@@ -358,7 +358,7 @@ RNode VBSTagging(RNode df_, std::string jetCollectionName = "jet")
 
     // Per-variation VBS tagging: re-run the BDT on the variation's good-jet set with its
     // varied pt/mass (eta/phi are JEC-invariant). Only the two all-jet-frame indices and
-    // the score are stored per variation — downstream can rebuild the kinematics from
+    // the score are stored per variation - downstream can rebuild the kinematics from
     // Jet_*[vbs_jet*_Jetidx*], keeping the branch count small.
     for (const auto& sfx : activeKinVariations(df)) {
         df = df.Define("_vbs_pair_" + sfx, VBSBDTInferMasked,
@@ -427,8 +427,8 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut, bool isData)
 
         // Channel orthogonality selection
         df = definePerVariationPassFlags(df, "0lep_0FJ", [](const std::string& sfx){
-            const std::string n = sfx.empty() ? "nfatjet" : "nfatjet_" + sfx;
-            return "(nLep_Sel == 0) && (" + n + " == 0)";
+            const std::string fjCountCol = sfx.empty() ? "nfatjet" : "nfatjet_" + sfx;
+            return "(nLep_Sel == 0) && (" + fjCountCol + " == 0)";
         });
         df = df.Filter(orPassExpr(df, "0lep_0FJ"), "C2: 0lep_0FJ");
 
@@ -448,8 +448,8 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut, bool isData)
 
         // Channel orthogonality selection
         df = definePerVariationPassFlags(df, "0lep_1FJ", [](const std::string& sfx){
-            const std::string n = sfx.empty() ? "nfatjet" : "nfatjet_" + sfx;
-            return "(nLep_Sel == 0) && (" + n + " == 1)";
+            const std::string fjCountCol = sfx.empty() ? "nfatjet" : "nfatjet_" + sfx;
+            return "(nLep_Sel == 0) && (" + fjCountCol + " == 1)";
         });
         df = df.Filter(orPassExpr(df, "0lep_1FJ"), "C2: 0lep_1FJ");
 
@@ -473,8 +473,8 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut, bool isData)
 
         // Channel orthogonality selection
         df = definePerVariationPassFlags(df, "0lep_1FJ_met", [](const std::string& sfx){
-            const std::string n = sfx.empty() ? "nfatjet" : "nfatjet_" + sfx;
-            return "(nLep_Sel == 0) && (" + n + " == 1)";
+            const std::string fjCountCol = sfx.empty() ? "nfatjet" : "nfatjet_" + sfx;
+            return "(nLep_Sel == 0) && (" + fjCountCol + " == 1)";
         });
         df = df.Filter(orPassExpr(df, "0lep_1FJ_met"), "C2: 0lep_1FJ");
     }
@@ -490,8 +490,8 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut, bool isData)
 
         // Channel orthogonality selection
         df = definePerVariationPassFlags(df, "0lep_2FJ", [](const std::string& sfx){
-            const std::string n = sfx.empty() ? "nfatjet" : "nfatjet_" + sfx;
-            return "(nLep_Sel == 0) && (" + n + " == 2)";
+            const std::string fjCountCol = sfx.empty() ? "nfatjet" : "nfatjet_" + sfx;
+            return "(nLep_Sel == 0) && (" + fjCountCol + " == 2)";
         });
         df = df.Filter(orPassExpr(df, "0lep_2FJ"), "C2: 0lep_2FJ");
 
@@ -514,8 +514,8 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut, bool isData)
 
         // Channel orthogonality selection
         df = definePerVariationPassFlags(df, "0lep_2FJ_met", [](const std::string& sfx){
-            const std::string n = sfx.empty() ? "nfatjet" : "nfatjet_" + sfx;
-            return "(nLep_Sel == 0) && (" + n + " == 2)";
+            const std::string fjCountCol = sfx.empty() ? "nfatjet" : "nfatjet_" + sfx;
+            return "(nLep_Sel == 0) && (" + fjCountCol + " == 2)";
         });
         df = df.Filter(orPassExpr(df, "0lep_2FJ_met"), "C2: 0lep_2FJ");
     }
@@ -531,13 +531,13 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut, bool isData)
 
         // Channel orthogonality selection
         df = definePerVariationPassFlags(df, "0lep_3FJ", [](const std::string& sfx){
-            const std::string n = sfx.empty() ? "nfatjet" : "nfatjet_" + sfx;
-            return "(nLep_Sel == 0) && (" + n + " == 3)";
+            const std::string fjCountCol = sfx.empty() ? "nfatjet" : "nfatjet_" + sfx;
+            return "(nLep_Sel == 0) && (" + fjCountCol + " == 3)";
         });
         df = df.Filter(orPassExpr(df, "0lep_3FJ"), "C2: 0lep_3FJ");
     }
 
-    // 1lep_1FJ — fatjet + njet cuts must combine inside a single per-variation pass flag,
+    // 1lep_1FJ - fatjet + njet cuts must combine inside a single per-variation pass flag,
     // because OR-ing over two consecutive jet-count filters would mix variations across
     // different cuts. Cutflow C3 + C4 (separate fatjet/njet steps) collapse into a single
     // "any-variation jet selection" entry.
@@ -560,14 +560,14 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut, bool isData)
         Cutflow::Add(df, "C2: 1-lepton selection");
 
         df = definePerVariationPassFlags(df, "1lep_1FJ", [](const std::string& sfx){
-            const std::string fj = sfx.empty() ? "nfatjet" : "nfatjet_" + sfx;
-            const std::string j  = sfx.empty() ? "njet"     : "njet_"     + sfx;
-            return "(" + fj + " == 1) && (" + j + " >= 4)";
+            const std::string fjCountCol = sfx.empty() ? "nfatjet" : "nfatjet_" + sfx;
+            const std::string jCountCol  = sfx.empty() ? "njet"     : "njet_"     + sfx;
+            return "(" + fjCountCol + " == 1) && (" + jCountCol + " >= 4)";
         });
         df = df.Filter(orPassExpr(df, "1lep_1FJ"), "C3: jet selection (any variation)");
     }
 
-    // 1lep_2FJ — same caveat as 1lep_1FJ (C3 + C4 collapsed).
+    // 1lep_2FJ - same caveat as 1lep_1FJ (C3 + C4 collapsed).
     else if (channel == "1lep_2FJ"){
 
         df = VBSTagging(df, "jetNoFJClean");
@@ -588,9 +588,9 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut, bool isData)
         Cutflow::Add(df, "C2: 1-lepton selection");
 
         df = definePerVariationPassFlags(df, "1lep_2FJ", [](const std::string& sfx){
-            const std::string fj = sfx.empty() ? "nfatjet" : "nfatjet_" + sfx;
-            const std::string j  = sfx.empty() ? "njet"     : "njet_"     + sfx;
-            return "(" + fj + " >= 2) && (" + j + " >= 2)";
+            const std::string fjCountCol = sfx.empty() ? "nfatjet" : "nfatjet_" + sfx;
+            const std::string jCountCol  = sfx.empty() ? "njet"     : "njet_"     + sfx;
+            return "(" + fjCountCol + " >= 2) && (" + jCountCol + " >= 2)";
         });
         df = df.Filter(orPassExpr(df, "1lep_2FJ"), "C3: jet selection (any variation)");
     }
@@ -625,8 +625,8 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut, bool isData)
 
         // Channel orthogonality selection
         df = definePerVariationPassFlags(df, "2lep_1FJ", [](const std::string& sfx){
-            const std::string n = sfx.empty() ? "nfatjet" : "nfatjet_" + sfx;
-            return "(nLep_Sel == 2) && (" + n + " == 1)";
+            const std::string fjCountCol = sfx.empty() ? "nfatjet" : "nfatjet_" + sfx;
+            return "(nLep_Sel == 2) && (" + fjCountCol + " == 1)";
         });
         df = df.Filter(orPassExpr(df, "2lep_1FJ"), "C2: 2lep_1FJ");
     }
@@ -644,8 +644,8 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut, bool isData)
 
         // Channel orthogonality selection
         df = definePerVariationPassFlags(df, "2lep_2FJ", [](const std::string& sfx){
-            const std::string n = sfx.empty() ? "nfatjet" : "nfatjet_" + sfx;
-            return "(nLep_Sel == 2) && (" + n + " == 2)";
+            const std::string fjCountCol = sfx.empty() ? "nfatjet" : "nfatjet_" + sfx;
+            return "(nLep_Sel == 2) && (" + fjCountCol + " == 2)";
         });
         df = df.Filter(orPassExpr(df, "2lep_2FJ"), "C2: 2lep_2FJ");
     }
