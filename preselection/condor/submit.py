@@ -384,7 +384,7 @@ def create_tarball(preselection_dir: Path) -> Path:
     bdt_dir = "bdt/"
     # Items to include in tarball (from preselection dir)
     preselection_items = [
-        "Makefile", "src", "include", "corrections",
+        "Makefile", "src", "include", "corrections", "applybtag.yaml",
         "etc/goldenJson", spanet_run2_dir, spanet_run3_dir,
         bdt_dir
     ]

@@ -1,0 +1,14 @@
+all_events: False
+0lep_0FJ: True
+0lep_1FJ: True
+0lep_1FJ_met: True
+0lep_2FJ: True
+0lep_2FJ_met: True
+0lep_3FJ: True
+1lep_1FJ: True
+1lep_2FJ: True
+2lep_1FJ: True
+2lepSS: False
+2lep_2FJ: True
+3lep: True
+4lep: True

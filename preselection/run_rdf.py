@@ -140,10 +140,6 @@ def main():
         # Make sure this is a channel RDF knows about
         if (chan_name not in ANA_CHANNELS.keys()) and (chan_name != "all_events"):
             raise Exception(f"Error unknown channel: {chan_name}")
-        if chan_name == "all_events" and not args.skip_btag_sf:
-            raise Exception(
-                "all_events has no channel-specific b-tag efficiency payload. "
-                "Specify an analysis channel, or rerun with --skip-btag-sf.")
         if args.btag_eff and chan_name in B_TAG_EFF_EXCLUDED_CHANNELS:
             raise Exception(f"--btag-eff production is excluded for {chan_name}")
 

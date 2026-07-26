@@ -92,6 +92,12 @@ The stored `*_mcstat_unc` efficiency uncertainties are informational diagnostics
 only; they are not consumed by the main analysis. (B-tagging SF variation
 branches are separate and remain part of the analysis weighting.)
 
+Normal MC b-tag SF application is controlled per analysis channel by
+`applybtag.yaml`. A channel set to `True` receives the nominal b-tag factor and
+its variation branches; a channel set to `False` receives neither. The
+`--skip-btag-sf` option overrides a `True` entry for one invocation. Disabled
+channels retain the ordinary uncoupled pileup, PS, muF, and muR variations.
+
 HF calibration SFs are written as `{central,up,down}` vectors.  The canonical
 year-decorrelated branches are `weight_btagging_sf_HF_uncorrelated_<year>` and
 `weight_btagging_sf_HF_statistic_<year>`; the other source branches use

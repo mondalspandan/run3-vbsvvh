@@ -25,4 +25,6 @@ inline std::string bTagSafeYearToken(std::string year) {
     return year;
 }
 
+bool bTagScaleFactorsEnabled(const std::string &channel);
+
 #endif

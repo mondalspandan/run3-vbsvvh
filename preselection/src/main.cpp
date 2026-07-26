@@ -14,6 +14,7 @@
 #include "spanet.h"
 #include "spanet_run2.h"
 #include "btag_efficiencies.h"
+#include "btag_settings.h"
 
 #include <optional>
 #include <set>
@@ -101,11 +102,9 @@ int main(int argc, char** argv) {
         throw std::runtime_error("Invalid run_number: must be 2 or 3");
     }
 
-    if (args.ana == "all_events" && !args.skipBTagScaleFactors) {
-        throw std::runtime_error(
-            "all_events has no channel-specific b-tag efficiency payload. "
-            "Specify an analysis channel, or rerun with --skip-btag-sf.");
-    }
+    const bool channelBTagScaleFactors =
+        std::find(channels.begin(), channels.end(), args.ana) != channels.end()
+        ? bTagScaleFactorsEnabled(args.ana) : false;
 
     // UParTAK4 has no matching fixed-WP calibration for the NanoAODv12
     // 2022/2023 eras.  Do not derive efficiencies from the unrelated 2024
@@ -227,18 +226,22 @@ int main(int argc, char** argv) {
                                          btag_efficiency_metadata->year, btag_efficiency_metadata->sample, nslots);
             return 0;
         }
+        const bool applyBTagScaleFactors = channelBTagScaleFactors && !args.skipBTagScaleFactors;
         if (args.skipBTagScaleFactors)
             std::cout << " -> B-tag SF application disabled by --skip-btag-sf" << std::endl;
+        else if (!channelBTagScaleFactors)
+            std::cout << " -> B-tag SF application disabled for " << args.ana
+                      << " by applybtag.yaml" << std::endl;
         else
             std::cout << " -> Applying b-tag SFs" << std::endl;
         const auto metadata = getSingleSampleBTagEfficiencyMetadata(input_spec);
         const std::set<std::string> supported_btag_years = {
             "2016preVFP", "2016postVFP", "2017", "2018", "2024Prompt"};
-        if (!args.skipBTagScaleFactors && !supported_btag_years.count(metadata.year))
+        if (applyBTagScaleFactors && !supported_btag_years.count(metadata.year))
             throw std::runtime_error(
                 "B-tag SF application is unsupported for " + metadata.year +
                 "; rerun with --skip-btag-sf");
-        df = applyMCWeights(df, args.ana, metadata.year, !args.skipBTagScaleFactors);
+        df = applyMCWeights(df, args.ana, metadata.year, applyBTagScaleFactors);
     }
 
     Cutflow::Add(df, "After SFs and corrections");
@@ -251,7 +254,8 @@ int main(int argc, char** argv) {
     }
 
     saveSnapshot(df, output_dir, output_file, isSignal, args.dumpInput, args.storeHLT);
-    if (!isData) printBTagDiagnostics();
+    if (!isData && channelBTagScaleFactors && !args.skipBTagScaleFactors)
+        printBTagDiagnostics();
     Cutflow::Print();
 
     return 0;

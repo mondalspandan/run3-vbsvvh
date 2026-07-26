@@ -775,14 +775,6 @@ RNode applyMCWeights(RNode df_, const std::string &channel, const std::string &n
         }
         resetBTagDiagnostics();
         df = applyBTaggingScaleFactors(std::move(btag_corrections), bTaggingScaleFactors_HF_corrname, bTaggingScaleFactors_LF_corrname, channel, nuisance_year, df);
-    } else {
-        auto unit_btag_weight = [] () { return RVec<double>{1., 1., 1.}; };
-        for (const auto source : kBTagHFSources)
-            df = df.Define(bTagHFSourceIsCoupled(source) ? bTagHFInternalBranchName(source) : bTagHFBranchName(source, nuisance_year), unit_btag_weight);
-        const std::string hf_uncorrelated = bTagHFBranchName("uncorrelated", nuisance_year);
-        const std::string lf_uncorrelated = "weight_btagging_sf_LF_uncorrelated_" + bTagSafeYearToken(nuisance_year);
-        df = df.Define(lf_uncorrelated, unit_btag_weight)
-               .Define("weight_btagging_sf_LF_correlated", unit_btag_weight);
     }
 
     if (hasLHEPart) {
@@ -803,29 +795,40 @@ RNode applyMCWeights(RNode df_, const std::string &channel, const std::string &n
         df = df.Define("_weight_muR_raw", [] () { return RVec<float>{1.f, 1.f, 1.f}; }, {});
     }
 
-    // The nominal event weight already contains the central HF b-tag factor.
-    // Couple matching analysis variations to the corresponding HF source once.
-    df = df.Define("weight_pileup", correlateWeightWithBTagSource<double>,
-                   {"_weight_pileup_raw", bTagHFInternalBranchName("pileup")})
-           .Define("weight_PSISR", correlateWeightWithBTagSource<float>,
-                   {"_weight_PSISR_raw", bTagHFInternalBranchName("isrdef")})
-           .Define("weight_PSFSR", correlateWeightWithBTagSource<float>,
-                   {"_weight_PSFSR_raw", bTagHFInternalBranchName("fsrdef")})
-           .Define("weight_muF", correlateWeightWithBTagSource<float>,
-                   {"_weight_muF_raw", bTagHFInternalBranchName("muf")})
-           .Define("weight_muR", correlateWeightWithBTagSource<float>,
-                   {"_weight_muR_raw", bTagHFInternalBranchName("mur")});
+    if (apply_btag_sf) {
+        // The nominal event weight already contains the central HF b-tag factor.
+        // Couple matching analysis variations to the corresponding HF source once.
+        df = df.Define("weight_pileup", correlateWeightWithBTagSource<double>,
+                       {"_weight_pileup_raw", bTagHFInternalBranchName("pileup")})
+               .Define("weight_PSISR", correlateWeightWithBTagSource<float>,
+                       {"_weight_PSISR_raw", bTagHFInternalBranchName("isrdef")})
+               .Define("weight_PSFSR", correlateWeightWithBTagSource<float>,
+                       {"_weight_PSFSR_raw", bTagHFInternalBranchName("fsrdef")})
+               .Define("weight_muF", correlateWeightWithBTagSource<float>,
+                       {"_weight_muF_raw", bTagHFInternalBranchName("muf")})
+               .Define("weight_muR", correlateWeightWithBTagSource<float>,
+                       {"_weight_muR_raw", bTagHFInternalBranchName("mur")});
+    } else {
+        df = df.Define("weight_pileup", [](const RVec<double> &weight) { return weight; }, {"_weight_pileup_raw"})
+               .Define("weight_PSISR", [](const RVec<float> &weight) { return weight; }, {"_weight_PSISR_raw"})
+               .Define("weight_PSFSR", [](const RVec<float> &weight) { return weight; }, {"_weight_PSFSR_raw"})
+               .Define("weight_muF", [](const RVec<float> &weight) { return weight; }, {"_weight_muF_raw"})
+               .Define("weight_muR", [](const RVec<float> &weight) { return weight; }, {"_weight_muR_raw"});
+    }
 
-    const std::string nominal_weight = std::string("weight *") +
+    std::string nominal_weight = std::string("weight *") +
         "weight_pileup[0] * "
         "weight_muonid[0] * "
         "weight_muonreco[0] * "
         "weight_muontrigger[0] * "
         "weight_electronid[0] * "
         "weight_electronreco[0] * "
-        "weight_electrontrigger[0] * " +
-        bTagHFBranchName("uncorrelated", nuisance_year) + "[0] * "
-        "weight_btagging_sf_LF_uncorrelated_" + bTagSafeYearToken(nuisance_year) + "[0] * "
+        "weight_electrontrigger[0] * ";
+    if (apply_btag_sf)
+        nominal_weight += bTagHFBranchName("uncorrelated", nuisance_year) + "[0] * "
+                          "weight_btagging_sf_LF_uncorrelated_" +
+                          bTagSafeYearToken(nuisance_year) + "[0] * ";
+    nominal_weight +=
         "weight_ewk * "
         // "weight_l1prefiring[0] * "
         "weight_PSISR[0] * "
