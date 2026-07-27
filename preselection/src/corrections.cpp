@@ -1464,8 +1464,8 @@ RNode HEMCorrection(RNode df, bool isData) {
     auto HEMCorrections = [isData](unsigned int run, unsigned long long event, std::string sample_year, RVec<float> pt, RVec<float> eta, RVec<float> phi, RVec<float> jet_id) {
         RVec<bool> jet_mask;   
         if (sample_year == "2018" && ((isData && run >= 319077) || (!isData && event % 100 < 64))) {
-            jet_mask = (jet_id >= 2 && pt > 15.0); // NanoAOD jetID convention https://twiki.cern.ch/twiki/bin/view/CMSPublic/WorkBookNanoAOD#Jets
-                                                    // should still work for current skimmer, which sets jetId==3 : "pass tight ID, fail tightLepVeto", jetId==7 : "pass tight and tightLepVeto ID"
+            jet_mask = (jet_id >= 2 && pt > 15.0); // v>= 30 skims follow NanoAOD jetID convention https://twiki.cern.ch/twiki/bin/view/CMSPublic/WorkBookNanoAOD#Jets
+                                                    // works also for v < 30 skims, which set jetId==3 : "pass tight ID, fail tightLepVeto", jetId==7 : "pass tight and tightLepVeto ID"
             auto eta_ = eta[jet_mask];
             auto phi_ = phi[jet_mask];
             for (size_t i = 0; i < eta_.size(); i++) {
@@ -1582,10 +1582,30 @@ JET VETO MAPS
 ############################################
 */
 
+/*
+The per-jet gate differs between the two runs, following the JME prescriptions
+(CORRECTIONS.md Sec. 8.0). Both ask for pT > 15 GeV and chEmEF + neEmEF < 0.9; they
+differ in the jet ID and in the muon-overlap treatment:
+
+  Run 3 : tightLepVeto jet ID.
+  Run 2 : tight jet ID, and jets overlapping a PF muon within dR < 0.2 are
+          EXEMPT from the veto (the recipe removes them from the check).
+
+The ID cuts are written `>= 6` / `>= 2` rather than `== 6` / `== 2` so that both
+jetId encodings work: v >= 30 skims use the NanoAOD convention 2*tight +
+4*tightLepVeto (values 0/2/6), older skims set 3 = "tight, fails tightLepVeto"
+and 7 = "tight and tightLepVeto". tightLepVeto implies tight in both, so no value
+clears `>= 6` without the tightLepVeto bit. `== 6` silently matched nothing on a
+pre-v30 skim, disabling the veto map with no warning.
+
+Note the Run 2 tight cut matches the ID required by the good-AK4 selection
+(`Jet_jetId >= 2`, selections.cpp) — a jet cannot enter the analysis but be
+exempt from the veto that is supposed to clean it.
+*/
 RNode applyJetVetoMaps(RNode df) {
-    auto eval_correction = [] (std::string year, RVec<float> pt, RVec<float> eta, RVec<float> phi, RVec<float> jet_id, RVec<float> jet_nuEmEF, RVec<float> jet_chEmEF) {
+    auto eval_correction = [] (std::string year, bool isRun2, RVec<float> pt, RVec<float> eta, RVec<float> phi, RVec<float> jet_id, RVec<float> jet_nuEmEF, RVec<float> jet_chEmEF, RVec<float> muon_eta, RVec<float> muon_phi, RVec<bool> muon_isPFcand) {
         RVec<bool> jet_veto_map;
-        
+
         if (jetVetoMaps().find(year) == jetVetoMaps().end()) {
             static std::unordered_set<std::string> warned_years;
             if (warned_years.find(year) == warned_years.end()) {
@@ -1598,23 +1618,39 @@ RNode applyJetVetoMaps(RNode df) {
             return jet_veto_map;
         }
 
+        const float min_jet_id = isRun2 ? 2.0f : 6.0f;   // tight (Run 2) vs tightLepVeto (Run 3)
+
         for (size_t i = 0; i < eta.size(); i++) {
+            if (!(pt[i] > 15.0 && jet_id[i] >= min_jet_id && (jet_nuEmEF[i] + jet_chEmEF[i]) < 0.9)) {
+                jet_veto_map.push_back(false);
+                continue;
+            }
+            // Run 2 only: the recipe checks jets that do NOT overlap a PF muon within dR < 0.2.
+            // NanoAOD stores muons down to pT ~ 3 GeV, so softer PF muons are invisible here.
+            if (isRun2) {
+                bool overlaps_pf_muon = false;
+                for (size_t j = 0; j < muon_eta.size(); j++) {
+                    if (muon_isPFcand[j] && ROOT::VecOps::DeltaR(eta[i], muon_eta[j], phi[i], muon_phi[j]) < 0.2) {
+                        overlaps_pf_muon = true;
+                        break;
+                    }
+                }
+                if (overlaps_pf_muon) {
+                    jet_veto_map.push_back(false);
+                    continue;
+                }
+            }
             float eta_ = eta[i];
             if (std::abs(eta_) > 5.19) {
                 eta_ = 5.19 * (eta_ > 0 ? 1 : -1);
             }
-            bool is_vetoed = jetVetoMaps().at(year).at(jetVetoMap_names().at(year))->evaluate({"jetvetomap", eta_, phi[i]}) != 0;
-            if (is_vetoed && (pt[i] > 15.0 && jet_id[i] == 6 && (jet_nuEmEF[i] + jet_chEmEF[i]) < 0.9)) {
-                jet_veto_map.push_back(true);
-            } else {
-                jet_veto_map.push_back(false);
-            }
+            jet_veto_map.push_back(jetVetoMaps().at(year).at(jetVetoMap_names().at(year))->evaluate({"jetvetomap", eta_, phi[i]}) != 0);
         }
 
         return jet_veto_map;
     };
-    
-    return df.Define("Jet_vetoMap", eval_correction, {"year", "Jet_pt", "Jet_eta", "Jet_phi", "Jet_jetId", "Jet_neEmEF", "Jet_chEmEF"});
+
+    return df.Define("Jet_vetoMap", eval_correction, {"year", "isRun2", "Jet_pt", "Jet_eta", "Jet_phi", "Jet_jetId", "Jet_neEmEF", "Jet_chEmEF", "Muon_eta", "Muon_phi", "Muon_isPFcand"});
 }
 
 /*
