@@ -236,7 +236,8 @@ const CSetMap& jetVetoMaps() {
         {"2022Re-recoE+PromptFG", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run3-22EFGSep23-Summer22EE-NanoAODv12/latest/jetvetomaps.json.gz")},
         {"2023PromptC", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run3-23CSep23-Summer23-NanoAODv12/latest/jetvetomaps.json.gz")},
         {"2023PromptD", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run3-23DSep23-Summer23BPix-NanoAODv12/latest/jetvetomaps.json.gz")},
-        {"2024Prompt", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run3-24CDEReprocessingFGHIPrompt-Summer24-NanoAODv15/latest/jetvetomaps.json.gz")}
+        {"2024Prompt", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run3-24CDEReprocessingFGHIPrompt-Summer24-NanoAODv15/latest/jetvetomaps.json.gz")},
+        {"2025", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run3-25Prompt-Summer24-NanoAODv15/latest/jetvetomaps.json.gz")}
     };
     return m;
 }
@@ -250,7 +251,8 @@ const StrMap jetVetoMap_names = {
     {"2022Re-recoE+PromptFG", "Summer22EE_23Sep2023_RunEFG_V1"},
     {"2023PromptC", "Summer23Prompt23_RunC_V1"},
     {"2023PromptD", "Summer23BPixPrompt23_RunD_V1"},
-    {"2024Prompt", "Summer24Prompt24_RunBCDEFGHI_V1"}
+    {"2024Prompt", "Summer24Prompt24_RunBCDEFGHI_V1"},
+    {"2025", "Summer24Prompt25_RunCDEFG_V1"}
 };
 
 // --- Electron scale & smearing ---------------------------------------------------------
