@@ -244,9 +244,9 @@ lookups and carry no NanoAOD-version dependence).
 
 The map type we evaluate is 'jetvetomap' — the type the JSONs themselves
 document as "the recommended map for analyses", for both Run 2 and Run 3.
-Application differs by run period, per the JME prescription (see CORRECTIONS.md
-Sec. 8): Run 3 vetoes the whole EVENT if any jet lands in a veto region, Run 2
-vetoes only the JETS themselves.
+Application differs by run period, per the JME prescription: Run 3 vetoes the
+whole EVENT if any jet lands in a veto region, Run 2 vetoes only the JETS
+themselves. See applyJetVetoMaps below for the per-jet gate.
 Run 2 recommendations: https://cms-jerc.web.cern.ch/Recommendations/#run-2_1
 */
 struct EraVetoMap {
@@ -309,7 +309,7 @@ const CSetMap& electronSSCorrections() {
 }
 
 // --- JMS/JMR placeholder maps (unwired; template for the future GloParT calibration) ----
-// See the JMS/JMR section in corrections.h and CORRECTIONS.md § 5-6. Identity-valued:
+// See the JMS/JMR section in corrections.h. Identity-valued:
 // JMS shift 0.0 GeV, JMR factor 1.0. σ_rel feeds the unmatched stochastic branch of
 // applyJetMassResolution and is unreachable while the factor is 1.0 — replace both
 // together with the per-era values from the calibration fit.
@@ -1584,8 +1584,8 @@ JET VETO MAPS
 
 /*
 The per-jet gate differs between the two runs, following the JME prescriptions
-(CORRECTIONS.md Sec. 8.0). Both ask for pT > 15 GeV and chEmEF + neEmEF < 0.9; they
-differ in the jet ID and in the muon-overlap treatment:
+linked above. Both ask for pT > 15 GeV and chEmEF + neEmEF < 0.9; they differ in
+the jet ID and in the muon-overlap treatment:
 
   Run 3 : tightLepVeto jet ID.
   Run 2 : tight jet ID, and jets overlapping a PF muon within dR < 0.2 are
@@ -1830,7 +1830,7 @@ RNode applyMCCorrections(RNode df_) {
     df = applyMETPhiCorrections(df, false);
     // GloParT JMS/JMR would be wired here via applyJetMassScale / applyJetMassResolution
     // once the calibration is derived. FatJet_msoftdrop is intentionally not calibrated
-    // (loose object cut only; GloParT is used in the rest of the analysis) — see CORRECTIONS.md § 5-6.
+    // (loose object cut only; GloParT is used in the rest of the analysis).
     df = HEMCorrection(df, false);
     df = applyElectronScaleAndSmearing(df, false);
     return df;

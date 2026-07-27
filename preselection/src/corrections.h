@@ -56,8 +56,8 @@ Convention:
 
 applyJetMassScale / applyJetMassResolution (corrections.cpp) are column-agnostic — the
 mass branch and (for JMR) the gen mass + gen-index branches are passed in. This
-analysis intends to calibrate on the GloParT regressed mass, not FatJet_msoftdrop
-(see CORRECTIONS.md § 5-6), and the calibration is not yet derived — the helpers
+analysis intends to calibrate on the GloParT regressed mass, not FatJet_msoftdrop,
+and the calibration is not yet derived — the helpers
 are currently unwired in applyMCCorrections. Identity-valued placeholder maps
 (a template for the future calibration) live in corrections.cpp.
 */
