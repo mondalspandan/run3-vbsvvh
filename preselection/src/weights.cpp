@@ -55,7 +55,10 @@ std::string bTagHFBranchName(std::string_view source, const std::string &year) {
 }
 
 bool bTagHFSourceIsCoupled(std::string_view source) {
-    return source == "pileup" || source == "isrdef" || source == "fsrdef" || source == "muf" || source == "mur";
+    // JES/JER are coupled to the corresponding kinematic event variations;
+    // they are not independent b-tag nuisances in the output schema.
+    return source == "pileup" || source == "isrdef" || source == "fsrdef" || source == "muf" || source == "mur" ||
+           source == "jes" || source == "jer";
 }
 
 std::string bTagHFInternalBranchName(std::string_view source) {
@@ -78,6 +81,10 @@ RVec<T> correlateWeightWithBTagSource(const RVec<T> &raw, const RVec<double> &bt
         throw std::runtime_error("Cannot correlate analysis weight with an invalid central HF b-tag factor");
     return RVec<T>{raw[0], static_cast<T>(raw[1] * btag[1] / btag[0]),
                    static_cast<T>(raw[2] * btag[2] / btag[0])};
+}
+
+RVec<double> bTagKinematicVariationRatios(const RVec<double> &btag) {
+    return correlateWeightWithBTagSource<double>(RVec<double>{1., 1., 1.}, btag);
 }
 
 struct BTagWeightBundle {
@@ -828,6 +835,19 @@ RNode applyMCWeights(RNode df_, const std::string &channel, const std::string &n
            .Define("weightsyst_PSFSR", [](const RVec<float> &weight) { return weight; }, {"weight_PSFSR"})
            .Define("weightsyst_muF", [](const RVec<float> &weight) { return weight; }, {"weight_muF"})
            .Define("weightsyst_muR", [](const RVec<float> &weight) { return weight; }, {"weight_muR"});
+
+    // The JES/JER source response is an event-level variation factor.  The
+    // shifted analysis templates multiply their corresponding variation by
+    // these vectors; no independent public b-tag JES/JER nuisance is emitted.
+    if (apply_btag_sf) {
+        df = df.Define("weightsyst_jes", bTagKinematicVariationRatios,
+                       {bTagHFInternalBranchName("jes")})
+               .Define("weightsyst_jer", bTagKinematicVariationRatios,
+                       {bTagHFInternalBranchName("jer")});
+    } else {
+        df = df.Define("weightsyst_jes", [] () { return RVec<double>{1., 1., 1.}; }, {})
+               .Define("weightsyst_jer", [] () { return RVec<double>{1., 1., 1.}; }, {});
+    }
 
     std::string nominal_weight = std::string("weight *") +
         "weightsyst_pileup[0] * "

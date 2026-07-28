@@ -103,8 +103,11 @@ year-decorrelated branches are `weight_btagging_sf_HF_uncorrelated_<year>` and
 `weight_btagging_sf_HF_statistic_<year>`; the other source branches use
 `weight_btagging_sf_HF_<source>`.  Run 2 provides `statistic`, `pileup`,
 `isrdef`, `fsrdef`, `muf`, `mur`, `pdf`, `as`, and `ttbar`; 2024 provides
-`statistic`, `pileup`, `isrdef`, `fsrdef`, `muf`, `mur`, `pdfas`, `jes`,
-`jer`, `type3`, `bfragmentation`, `topmass`, and `hdamp`.  Unavailable source
+`statistic`, `pileup`, `isrdef`, `fsrdef`, `muf`, `mur`, `pdfas`, `type3`,
+`bfragmentation`, `topmass`, and `hdamp`.  JES and JER are coupled to the
+corresponding kinematic variations through `weightsyst_jes` and
+`weightsyst_jer`; they are not published as independent b-tag branches.
+Unavailable source
 vectors are central/central/central.  `weight_pileup`, `weight_PSISR`,
 `weight_PSFSR`, `weight_muF`, and `weight_muR` already include their matching
 HF source.  There are no public `*_raw` columns or separate public HF
