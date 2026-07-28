@@ -115,6 +115,22 @@ RNode applyJESVariations(RNode df);
 // --no_systs to activate nominal-only mode.
 void setStoreSysts(bool v);
 
+// ---------------------------------------------------------------------------------------
+// DEBUGGING ONLY — jet veto map "compute but do not apply" mode.
+//
+// Called with false (via --no_jetveto), applyJetVetoMaps still DEFINES the per-jet
+// Jet_vetoMap flag, but AK4JetsSelection stops acting on it: the Run 3 event filter and
+// the `&& !Jet_vetoMap` term in every good-AK4 mask are both skipped. The output then
+// contains the events and jets the veto would have removed, tagged by Jet_vetoMap, so a
+// before/after study can be made from a SINGLE production by cutting on the flag offline.
+//
+// *** NEVER use this for an analysis production. *** Output produced with --no_jetveto is
+// NOT veto-map corrected: it retains jets in known-bad (eta, phi) regions and, in Run 3,
+// events carrying the spurious MET the veto exists to remove. It is for the jet veto map
+// validation study only (vbs-coffea/scripts/jetveto_studies).
+void setApplyJetVetoMaps(bool v);
+bool applyJetVetoMapsEnabled();
+
 // Public accessors for the variation suffixes. All return empty when
 // setStoreSysts(false) has been called.
 //   jesVariationSuffixes:       the 22 JES suffixes ("jesAbsoluteUp", ..., "jesRelativeSampleYearDn")

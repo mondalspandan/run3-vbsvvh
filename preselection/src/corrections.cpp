@@ -1074,6 +1074,11 @@ RNode applyJESVariations(RNode df) {
 static bool g_storeSysts = true;
 void setStoreSysts(bool v) { g_storeSysts = v; }
 
+// DEBUGGING ONLY — see the warning on setApplyJetVetoMaps in corrections.h.
+static bool g_applyJetVetoMaps = true;
+void setApplyJetVetoMaps(bool v) { g_applyJetVetoMaps = v; }
+bool applyJetVetoMapsEnabled() { return g_applyJetVetoMaps; }
+
 std::vector<std::string> jesVariationSuffixes() {
     if (!g_storeSysts) return {};
     std::vector<std::string> out;
@@ -1599,16 +1604,24 @@ RNode applyJetVetoMaps(RNode df) {
     auto eval_correction = [] (std::string year, bool isRun2, RVec<float> pt, RVec<float> eta, RVec<float> phi, RVec<float> jet_id, RVec<float> jet_nuEmEF, RVec<float> jet_chEmEF, RVec<float> muon_eta, RVec<float> muon_phi, RVec<bool> muon_isPFcand) {
         RVec<bool> jet_veto_map;
 
+        // Hard-fail on an unknown era, matching the JEC/JER behaviour. This used to warn once
+        // and flag nothing, which silently produced un-vetoed output. The trap is real: the
+        // 2022/2023 samples are tagged "2022"/"2023", which match none of the four split era
+        // keys the maps are published under ("2022Re-recoBCD", "2022Re-recoE+PromptFG",
+        // "2023PromptC", "2023PromptD"), so they would run with no veto at all. The maps for
+        // those eras ARE wired in eraVetoMapTable() and ready to use -- what is missing is the
+        // era split in the sample metadata, which must be fixed when the 2022/2023 skims land
+        // (the dataset names carry the era: Run2022C/D -> BCD, Run2022E/F/G -> E+PromptFG,
+        // Run2023C -> PromptC, Run2023D -> PromptD).
         if (jetVetoMaps().find(year) == jetVetoMaps().end()) {
-            static std::unordered_set<std::string> warned_years;
-            if (warned_years.find(year) == warned_years.end()) {
-                std::cout << "Warning: Jet veto map for year " << year << " not found. Setting all jets to not vetoed." << std::endl;
-                warned_years.insert(year);
-            }
-            for (size_t i = 0; i < eta.size(); i++) {
-                jet_veto_map.push_back(false);
-            }
-            return jet_veto_map;
+            std::string known;
+            for (const auto& [k, _] : eraVetoMapTable()) known += (known.empty() ? "" : ", ") + k;
+            throw std::runtime_error(
+                "Jet veto map: no map configured for year '" + year + "'. Known eras: " + known
+                + ". A year that reaches this point would run with NO veto map applied, so it is a "
+                  "hard error rather than a warning. If this is a 2022/2023 sample, re-tag its "
+                  "metadata to the matching split era key (the plain '2022'/'2023' keys are not "
+                  "valid -- the maps are published per run era).");
         }
 
         const float min_jet_id = isRun2 ? 2.0f : 6.0f;   // tight (Run 2) vs tightLepVeto (Run 3)

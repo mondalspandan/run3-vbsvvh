@@ -99,6 +99,7 @@ def main():
     parser.add_argument('-f', '--files-per-job',help = 'Number of input files per job (default: 10)', default=10, type=int)
     parser.add_argument('-d', '--dry-run',             help = 'Do not actually execute the run command', action='store_true')
     parser.add_argument('--store-hlt',                 help = 'Store HLT trigger branches in output', action='store_true')
+    parser.add_argument('--no-jetveto',                help = 'DEBUG ONLY: compute Jet_vetoMap but do not apply it (no Run 3 event veto, no jet masking). NOT for analysis production -- jet veto map validation study only', action='store_true')
     parser.add_argument('--memory',                    help = 'Memory per job for slurm submission (default: 8gb)', default=None)
     parser.add_argument('--time',                      help = 'Time limit per job for slurm submission (default: 04:00:00)', default=None)
     parser.add_argument('--sample',                    help = 'Regex to filter which samples to submit (slurm/condor only)', default=None)
@@ -155,8 +156,10 @@ def main():
 
         # Construct the bash run command
         hlt_flag = " --store_hlt" if args.store_hlt else ""
+        # DEBUG ONLY -- see runAnalysis --no_jetveto. Never use for analysis production.
+        jetveto_flag = " --no_jetveto" if args.no_jetveto else ""
         if args.mode == "local":
-            command = f"bin/runAnalysis -i {merged_json_name} -o {outdir} -n {args.outname} -a {chan_name} -j {args.n_cores or 64} --run_number {args.run} --progress{hlt_flag}"
+            command = f"bin/runAnalysis -i {merged_json_name} -o {outdir} -n {args.outname} -a {chan_name} -j {args.n_cores or 64} --run_number {args.run} --progress{hlt_flag}{jetveto_flag}"
             print(f"  -> Now running command \"{command}\"...\n")
             if not args.dry_run: os.system(command)
         elif args.mode == "condor":
@@ -171,7 +174,7 @@ def main():
             time_flag = f" --time {args.time}" if args.time else ""
             ncores_flag = f" -j {args.n_cores}" if args.n_cores else ""
             sample_flag = f" --sample '{args.sample}'" if args.sample else ""
-            command = f"python3 slurm/submit.py -c {merged_json_name} -a {chan_name} --run_number {args.run} --files-per-job {args.files_per_job} -o {outdir}{hlt_flag}{dry_run_flag}{memory_flag}{time_flag}{ncores_flag}{sample_flag}"
+            command = f"python3 slurm/submit.py -c {merged_json_name} -a {chan_name} --run_number {args.run} --files-per-job {args.files_per_job} -o {outdir}{hlt_flag}{jetveto_flag}{dry_run_flag}{memory_flag}{time_flag}{ncores_flag}{sample_flag}"
             print(f"  -> Running command \"{command}\"...\n")
             os.system(command)
 
