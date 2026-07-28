@@ -42,12 +42,76 @@ RNode applyPileupScaleFactors(std::unordered_map<std::string, correction::Correc
 
 /*
 ############################################
+Lepton SFs (putting e and m together)
+############################################
+*/
+
+// In weights.cpp - update the function:
+RNode lepSFWrapper(RNode df,
+    bool isData,
+    const std::string& ele_sf_name,
+    const std::string& muo_sf_name,
+    bool include_trigger_sf,
+    const std::string& ele_output_name,
+    const std::string& muo_output_name)
+{
+    // Early return for data - no SFs needed
+    if (isData) return df;
+
+    std::string final_ele_sf = ele_sf_name;
+    std::string final_muo_sf = muo_sf_name;
+
+    // Optionally include trigger SFs
+    if (include_trigger_sf) {
+        // Apply trigger SFs if not already present
+        auto colNames = df.GetColumnNames();
+        bool has_ele_trigger = std::find(colNames.begin(), colNames.end(), "_weight_electrontrigger") != colNames.end();
+        bool has_mu_trigger = std::find(colNames.begin(), colNames.end(), "_weight_muon_trigger") != colNames.end();
+        
+        if (!has_ele_trigger) {
+            df = applyElectronTriggerScaleFactors(electronTriggerScaleFactors, electronTriggerScaleFactors_yearmap, df);
+        }
+        if (!has_mu_trigger) {
+            df= applyMuonScaleFactors(muonScaleFactors, "_weight_muon_trigger", muonSFConfigs.at("_weight_muon_trigger"), df);
+        }
+        
+        // Multiply base SFs by trigger SFs
+        auto multiply_sf = [](const RVec<double>& base_sf, const RVec<double>& trig_sf) {
+            return RVec<double>{ base_sf[0]*trig_sf[0], base_sf[1]*trig_sf[1], base_sf[2]*trig_sf[2] };
+        };
+        df = df.Define("_" + ele_output_name + "_ele_with_trigger", multiply_sf, {ele_sf_name, "_weight_electrontrigger"});
+        df = df.Define("_" + muo_output_name + "_muo_with_trigger", multiply_sf, {muo_sf_name, "_weight_muon_trigger"});
+
+        final_ele_sf = "_" + ele_output_name + "_ele_with_trigger";
+        final_muo_sf = "_" + muo_output_name + "_muo_with_trigger";
+    }
+
+    // Create the separate electron and muon SF outputs with custom names
+    df = df.Define(ele_output_name, final_ele_sf);
+    df = df.Define(muo_output_name, final_muo_sf);
+
+    // Optionally update main weight
+    auto update_weight = [](double current_weight, const RVec<double>& ele_sf, const RVec<double>& muo_sf) {
+        return current_weight * ele_sf[0] * muo_sf[0];
+    };
+    df = df.Redefine("weight", update_weight, {"weight", final_ele_sf, final_muo_sf});
+
+    return df;
+}
+
+/*
+############################################
 MUON SFs
 ############################################
 */
 
-RNode applyMuonIDScaleFactors(std::unordered_map<std::string, correction::CorrectionSet> cset_muon, std::unordered_map<std::string, std::string> year_map, RNode df) {
-    auto eval_correction = [cset_muon, year_map] (std::string year, const RVec<float> eta, const RVec<float> pt) {
+RNode applyMuonScaleFactors(
+    std::unordered_map<std::string, MuonCorrectionSet> cset_muon,
+    std::string output_name,
+    MuonSFConfig config,
+    RNode df)
+{
+    auto eval_correction = [cset_muon, config] (std::string year, const RVec<float> eta, const RVec<float> pt) {
         RVec<double> muon_sf_weights = {1., 1., 1.};
         if (eta.empty()) {
             return muon_sf_weights;
@@ -55,77 +119,78 @@ RNode applyMuonIDScaleFactors(std::unordered_map<std::string, correction::Correc
         if (cset_muon.find(year) == cset_muon.end()) {
             static std::unordered_set<std::string> warned_years;
             if (warned_years.find(year) == warned_years.end()) {
-                std::cout << "Warning: Muon ID correction set for year " << year << " not found. Setting muon ID weights to 1." << std::endl;
+                std::cout << "Warning: Muon SF correction set for year " << year << " not found. Setting weights to 1." << std::endl;
                 warned_years.insert(year);
             }
             return muon_sf_weights;
         }
-        auto correctionset = cset_muon.at(year).at(year_map.at(year));
+        if (config.year_map.find(year) == config.year_map.end()) {
+            return muon_sf_weights;
+        }
+
+        const auto& entry = cset_muon.at(year);
+        const auto& year_config = config.year_map.at(year);
+        auto correctionset = entry.cset.at(year_config.correction_key);
+
         for (size_t i = 0; i < eta.size(); i++) {
-            float pt_min = 15.1;
-            float pt_to_pass = std::max(pt[i],pt_min);
-            muon_sf_weights[0] *= correctionset->evaluate({abs(eta[i]), pt_to_pass, "nominal"});
-            muon_sf_weights[1] *= correctionset->evaluate({abs(eta[i]), pt_to_pass, "systup"});
-            muon_sf_weights[2] *= correctionset->evaluate({abs(eta[i]), pt_to_pass, "systdown"});
+            float eta_to_pass = entry.abs_eta ? abs(eta[i]) : eta[i];
+            float pt_to_pass = std::max(pt[i], year_config.pt_min);
+
+            muon_sf_weights[0] *= correctionset->evaluate({eta_to_pass, pt_to_pass, "nominal"});
+            muon_sf_weights[1] *= correctionset->evaluate({eta_to_pass, pt_to_pass, "systup"});
+            muon_sf_weights[2] *= correctionset->evaluate({eta_to_pass, pt_to_pass, "systdown"});
         }
         return muon_sf_weights;
     };
-    return df.Define("weightsyst_muonid", eval_correction, {"year", "muon_eta", "muon_pt"});
+
+    return df.Define(output_name, eval_correction, {"year", "_muonSel_eta", "_muonSel_pt"});
 }
 
-RNode applyMuonRecoScaleFactors(std::unordered_map<std::string, correction::CorrectionSet> cset_muon, std::unordered_map<std::string, std::string> year_map, RNode df) {
-    auto eval_correction = [cset_muon, year_map] (std::string year, const RVec<float> eta, const RVec<float> pt) {
-        RVec<double> muon_sf_weights = {1., 1., 1.};
-        if (eta.empty()) {
-            return muon_sf_weights;
-        }
-        if (cset_muon.find(year) == cset_muon.end()) {
-            static std::unordered_set<std::string> warned_years;
-            if (warned_years.find(year) == warned_years.end()) {
-                std::cout << "Warning: Muon Reco correction set for year " << year << " not found. Setting muon reco weights to 1." << std::endl;
-                warned_years.insert(year);
-            }
-            return muon_sf_weights;
-        }
-        auto correctionset = cset_muon.at(year).at(year_map.at(year));
-        for (size_t i = 0; i < eta.size(); i++) {
-            float pt_max = 15.1;
-            float pt_to_pass = std::max(pt[i],pt_max);
-            muon_sf_weights[0] *= correctionset->evaluate({abs(eta[i]), pt_to_pass, "nominal"});
-            muon_sf_weights[1] *= correctionset->evaluate({abs(eta[i]), pt_to_pass, "systup"});
-            muon_sf_weights[2] *= correctionset->evaluate({abs(eta[i]), pt_to_pass, "systdown"});
-        }
-        return muon_sf_weights;
+RNode combineScaleFactorWeightsByKey(RNode df, std::string output_name, std::vector<std::string> input_keys)
+{
+    auto combine = [](const RVec<double>& w0,
+                      const RVec<double>& w1,
+                      const RVec<double>& w2) {
+        return RVec<double>{
+            w0[0] * w1[0] * w2[0],
+            w0[1] * w1[1] * w2[1],
+            w0[2] * w1[2] * w2[2]
+        };
     };
-    return df.Define("weightsyst_muonreco", eval_correction, {"year", "muon_eta", "muon_pt"});
+
+    return df.Define(output_name, combine, input_keys);
 }
 
-RNode applyMuonTriggerScaleFactors(std::unordered_map<std::string, correction::CorrectionSet> cset_muon, std::unordered_map<std::string, std::string> year_map, RNode df) {
-    auto eval_correction = [cset_muon, year_map] (std::string year, const RVec<float> eta, const RVec<float> pt) {
-        RVec<double> muon_sf_weights = {1., 1., 1.};
-        if (eta.empty()) {
-            return muon_sf_weights;
+
+RNode applyMuonWorkingPointSFs(RNode df, bool isData, std::vector<std::string> wp_keys)
+{
+    if (isData) return df;
+
+    std::unordered_set<std::string> component_keys;
+
+    for (const auto& wp_key : wp_keys) {
+        if (muonWorkingPointSFs.find(wp_key) == muonWorkingPointSFs.end()) {
+            throw std::runtime_error("applyMuonWorkingPointSFs: unknown WP key '" + wp_key + "'");
         }
-        if (cset_muon.find(year) == cset_muon.end()) {
-            static std::unordered_set<std::string> warned_years;
-            if (warned_years.find(year) == warned_years.end()) {
-                std::cout << "Warning: Muon Trigger correction set for year " << year << " not found. Setting muon trigger weights to 1." << std::endl;
-                warned_years.insert(year);
-            }
-            return muon_sf_weights;
+        for (const auto& component_key : muonWorkingPointSFs.at(wp_key)) {
+            component_keys.insert(component_key);
         }
-        auto correctionset = cset_muon.at(year).at(year_map.at(year));
-        for (size_t i = 0; i < eta.size(); i++) {
-            float pt_min = 29.1;
-            float pt_to_pass = std::max(pt[i],pt_min);
-            muon_sf_weights[0] *= correctionset->evaluate({abs(eta[i]), pt_to_pass, "nominal"});
-            muon_sf_weights[1] *= correctionset->evaluate({abs(eta[i]), pt_to_pass, "systup"});
-            muon_sf_weights[2] *= correctionset->evaluate({abs(eta[i]), pt_to_pass, "systdown"});
+    }
+
+    for (const auto& component_key : component_keys) {
+        if (muonSFConfigs.find(component_key) == muonSFConfigs.end()) {
+            throw std::runtime_error("applyMuonWorkingPointSFs: unknown component key '" + component_key + "'");
         }
-        return muon_sf_weights;
-    };
-    return df.Define("weightsyst_muontrigger", eval_correction, {"year", "muon_eta", "muon_pt"});
+        df = applyMuonScaleFactors(muonScaleFactors, component_key, muonSFConfigs.at(component_key), df);
+    }
+
+    for (const auto& wp_key : wp_keys) {
+        df = combineScaleFactorWeightsByKey(df, wp_key, muonWorkingPointSFs.at(wp_key));
+    }
+
+    return df;
 }
+
 
 /*
 ############################################
@@ -133,33 +198,8 @@ ELECTRON SFs
 ############################################
 */
 
-RNode applyElectronIDScaleFactors(std::unordered_map<std::string, correction::CorrectionSet> cset_electron, std::unordered_map<std::string, std::string> year_map, RNode df) {
-    auto eval_correction = [cset_electron, year_map] (std::string year, const RVec<float> eta, const RVec<float> pt) {
-        RVec<double> electron_sf_weights = {1., 1., 1.};
-        if (eta.empty()) {
-            return electron_sf_weights;
-        }
-        if (cset_electron.find(year) == cset_electron.end()) {
-            static std::unordered_set<std::string> warned_years;
-            if (warned_years.find(year) == warned_years.end()) {
-                std::cout << "Warning: Electron ID correction set for year " << year << " not found. Setting electron ID weights to 1." << std::endl;
-                warned_years.insert(year);
-            }
-            return electron_sf_weights;
-        }
-        auto correctionset = cset_electron.at(year).at(year_map.at(year));
-        for (size_t i = 0; i < eta.size(); i++) {
-            electron_sf_weights[0] *= correctionset->evaluate({year, "sf", "Tight", eta[i], pt[i]});
-            electron_sf_weights[1] *= correctionset->evaluate({year, "sfup", "Tight", eta[i], pt[i]});
-            electron_sf_weights[2] *= correctionset->evaluate({year, "sfdown", "Tight", eta[i], pt[i]});
-        }
-        return electron_sf_weights;
-    };
-    return df.Define("weightsyst_electronid", eval_correction, {"year", "electron_SC_eta", "electron_pt"});
-}
-
-RNode applyElectronRecoScaleFactors(std::unordered_map<std::string, correction::CorrectionSet> cset_electron, std::unordered_map<std::string, std::string> year_map, RNode df) {
-    auto eval_correction = [cset_electron, year_map] (std::string year, const RVec<float> eta, const RVec<float> pt) {
+RNode applyElectronRecoScaleFactors(std::unordered_map<std::string, correction::CorrectionSet> cset_electron, RNode df, std::string output_name) {
+    auto eval_correction = [cset_electron] (std::string year, const RVec<float> eta, const RVec<float> pt) {
         RVec<double> electron_sf_weights = {1., 1., 1.};
         if (eta.empty()) {
             return electron_sf_weights;
@@ -172,16 +212,16 @@ RNode applyElectronRecoScaleFactors(std::unordered_map<std::string, correction::
             }
             return electron_sf_weights;
         }
-        auto correctionset = cset_electron.at(year).at(year_map.at(year));
 
-        // Simple way to check if the year refers to Run 2
         bool is_run2 = (year.find("2016") != std::string::npos ||
                         year.find("2017") != std::string::npos ||
                         year.find("2018") != std::string::npos);
 
+        std::string correction_name = is_run2 ? "UL-Electron-ID-SF" : "Electron-ID-SF";
+        auto correctionset = cset_electron.at(year).at(correction_name);
+
         for (size_t i = 0; i < eta.size(); i++) {
             if (is_run2) {
-                // Run 2 Scale Factors
                 if (pt[i] >= 20) {
                     electron_sf_weights[0] *= correctionset->evaluate({year, "sf", "RecoAbove20", eta[i], pt[i]});
                     electron_sf_weights[1] *= correctionset->evaluate({year, "sfup", "RecoAbove20", eta[i], pt[i]});
@@ -192,7 +232,6 @@ RNode applyElectronRecoScaleFactors(std::unordered_map<std::string, correction::
                     electron_sf_weights[2] *= correctionset->evaluate({year, "sfdown", "RecoBelow20", eta[i], pt[i]});
                 }
             } else {
-                // Run 3 Scale Factors
                 if (pt[i] >= 20 && pt[i] < 75) {
                     electron_sf_weights[0] *= correctionset->evaluate({year, "sf", "Reco20to75", eta[i], pt[i]});
                     electron_sf_weights[1] *= correctionset->evaluate({year, "sfup", "Reco20to75", eta[i], pt[i]});
@@ -210,8 +249,96 @@ RNode applyElectronRecoScaleFactors(std::unordered_map<std::string, correction::
         }
         return electron_sf_weights;
     };
-    return df.Define("weightsyst_electronreco", eval_correction, {"year", "electron_SC_eta", "electron_pt"});
+    return df.Define(output_name, eval_correction, {"year", "_electronSel_SC_eta", "_electronSel_pt"});
 }
+
+RNode applyElectronIDScaleFactors(std::unordered_map<std::string, correction::CorrectionSet> cset_electron, ElectronIDConfig config, std::string output_name, RNode df) {
+    auto eval_correction = [cset_electron, config] (std::string year, const RVec<float> eta, const RVec<float> pt) {
+        RVec<double> electron_sf_weights = {1., 1., 1.};
+        if (eta.empty()) {
+            return electron_sf_weights;
+        }
+        if (cset_electron.find(year) == cset_electron.end()) {
+            static std::unordered_set<std::string> warned_years;
+            if (warned_years.find(year) == warned_years.end()) {
+                std::cout << "Warning: Electron ID correction set for year " << year << " not found. Setting electron ID weights to 1." << std::endl;
+                warned_years.insert(year);
+            }
+            return electron_sf_weights;
+        }
+        if (config.correction_name_map.find(year) == config.correction_name_map.end()) {
+            return electron_sf_weights;
+        }
+
+        auto correctionset = cset_electron.at(year).at(config.correction_name_map.at(year));
+        for (size_t i = 0; i < eta.size(); i++) {
+            electron_sf_weights[0] *= correctionset->evaluate({year, "sf", config.working_point, eta[i], pt[i]});
+            electron_sf_weights[1] *= correctionset->evaluate({year, "sfup", config.working_point, eta[i], pt[i]});
+            electron_sf_weights[2] *= correctionset->evaluate({year, "sfdown", config.working_point, eta[i], pt[i]});
+        }
+        return electron_sf_weights;
+    };
+    return df.Define(output_name, eval_correction, {"year", "_electronSel_SC_eta", "_electronSel_pt"});
+}
+
+RNode combineElectronScaleFactorWeightsByKey(RNode df, std::string output_name, std::vector<std::string> input_keys)
+{
+    auto combine = [](const RVec<double>& w0,
+                      const RVec<double>& w1) {
+        return RVec<double>{
+            w0[0] * w1[0],
+            w0[1] * w1[1],
+            w0[2] * w1[2]
+        };
+    };
+
+    return df.Define(output_name, combine, input_keys);
+}
+
+RNode applyElectronWorkingPointSFs(RNode df, bool isData, std::vector<std::string> wp_keys)
+{
+    if (isData) return df;
+
+    bool need_reco = false;
+    bool need_id_loose = false;
+    bool need_id_tight = false;
+
+    for (const auto& wp_key : wp_keys) {
+        if (wp_key == "_weight_electron_reco_looseid") {
+            need_reco = true;
+            need_id_loose = true;
+        }
+        else if (wp_key == "_weight_electron_reco_tightid") {
+            need_reco = true;
+            need_id_tight = true;
+        }
+        else {
+            throw std::runtime_error("applyElectronWorkingPointSFs: unknown WP key '" + wp_key + "'");
+        }
+    }
+
+    if (need_reco) {
+        df = applyElectronRecoScaleFactors(electronScaleFactors, df, "_weight_electron_reco");
+    }
+    if (need_id_loose) {
+        df = applyElectronIDScaleFactors(electronScaleFactors, electronID_loose, "_weight_electron_id_loose", df);
+    }
+    if (need_id_tight) {
+        df = applyElectronIDScaleFactors(electronScaleFactors, electronID_tight, "_weight_electron_id_tight", df);
+    }
+
+    for (const auto& wp_key : wp_keys) {
+        df = combineElectronScaleFactorWeightsByKey(df, wp_key, electronWorkingPointSFs.at(wp_key));
+    }
+
+    return df;
+}
+
+/*
+############################################
+ELECTRON TRIGGER SFs
+############################################
+*/
 
 RNode applyElectronTriggerScaleFactors(std::unordered_map<std::string, correction::CorrectionSet> cset_electron, std::unordered_map<std::string, std::string> year_map, RNode df) {
     auto eval_correction = [cset_electron, year_map] (std::string year, const RVec<float> eta, const RVec<float> pt) {
@@ -235,7 +362,7 @@ RNode applyElectronTriggerScaleFactors(std::unordered_map<std::string, correctio
         }
         return electron_sf_weights;
     };
-    return df.Define("weightsyst_electrontrigger", eval_correction, {"year", "electron_SC_eta", "electron_pt"});
+    return df.Define("_weight_electrontrigger", eval_correction, {"year", "electron_SC_eta", "electron_pt"});
 }
 
 /*
@@ -475,13 +602,6 @@ RNode applyMCWeights(RNode df_) {
     bool hasLHEPart = hasColumn("LHEPart_pt");
 
     auto df = applyPileupScaleFactors(pileupScaleFactors, pileupScaleFactors_yearmap, df_);
-    df = applyMuonIDScaleFactors(muonScaleFactors, muonIDScaleFactors_yearmap, df);
-    df = applyMuonRecoScaleFactors(muonScaleFactors, muonRecoScaleFactors_yearmap, df);
-    df = applyMuonTriggerScaleFactors(muonScaleFactors, muonTriggerScaleFactors_yearmap, df);
-
-    df = applyElectronIDScaleFactors(electronScaleFactors, electronScaleFactors_yearmap, df);
-    df = applyElectronRecoScaleFactors(electronScaleFactors, electronScaleFactors_yearmap, df);
-    df = applyElectronTriggerScaleFactors(electronTriggerScaleFactors, electronTriggerScaleFactors_yearmap, df);
 
     df = applyBTaggingScaleFactors(bTaggingScaleFactors, bTaggingScaleFactors_HF_corrname, bTaggingScaleFactors_LF_corrname,  df);
 
@@ -506,12 +626,6 @@ RNode applyMCWeights(RNode df_) {
     return df.Redefine("weight",
         "weight *"
         "weightsyst_pileup[0] * "
-        "weightsyst_muonid[0] * "
-        "weightsyst_muonreco[0] * "
-        "weightsyst_muontrigger[0] * "
-        "weightsyst_electronid[0] * "
-        "weightsyst_electronreco[0] * "
-        "weightsyst_electrontrigger[0] * "
         // "weightsyst_btagging_sf_HF[0] * "
         // "weightsyst_btagging_sf_LF[0] * "
         "ewkweight * "
