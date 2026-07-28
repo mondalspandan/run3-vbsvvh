@@ -11,7 +11,7 @@
             "metadata": {
                 "kind": "bkg",
                 "year": "2016preVFP",
-                "xsec": 1.256,
+                "xsec": 13.74,
                 "lumi": 19.52,
                 "shortname": "ZZTo4L_M-1toInf_TuneCP5_13TeV",
                 "do_ewk_corr": 0,
