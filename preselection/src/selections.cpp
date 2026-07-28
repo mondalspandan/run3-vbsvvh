@@ -552,7 +552,7 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut, bool isData)
         df = lepSFWrapper(df,isData, /*ele_sf_name=*/ "_weight_electron_reco_tightid", /*muo_sf_name=*/ "_weight_muon_tightid_tightiso", /*include_trigger_sf=*/ true);
 
         // Channel orthogonality selection
-        df = df.Filter("(nLep_Sel == 1) && (nfatjet == 1)", "C2: 1lep_1FJ");
+        df = df.Filter("(nLep_Sel == 1)", "C2: 1lep_1FJ");
 
         df = df.Filter("((nMuon_Loose == 1 && nMuon_Tight == 1 && nElectron_Loose == 0 && nElectron_Tight == 0) || "
                        "(nMuon_Loose == 0 && nMuon_Tight == 0 && nElectron_Loose == 1 && nElectron_Tight == 1)) && "
@@ -579,7 +579,7 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut, bool isData)
         df = lepSFWrapper(df,isData, /*ele_sf_name=*/ "_weight_electron_reco_tightid", /*muo_sf_name=*/ "_weight_muon_tightid_tightiso", /*include_trigger_sf=*/ true);
 
         // Channel orthogonality selection
-        df = df.Filter("(nLep_Sel == 1) && (nfatjet == 2)", "C2: 1lep_2FJ");
+        df = df.Filter("(nLep_Sel == 1)", "C2: 1lep_2FJ");
 
         df = df.Filter("((nMuon_Loose == 1 && nMuon_Tight == 1 && nElectron_Veto == 0 && nElectron_Loose == 0 && nElectron_Tight == 0) || "
                        "(nMuon_Loose == 0 && nMuon_Tight == 0 && nElectron_Veto == 1 && nElectron_Loose == 1 && nElectron_Tight == 1)) && "
