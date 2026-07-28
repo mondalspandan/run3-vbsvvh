@@ -244,9 +244,8 @@ lookups and carry no NanoAOD-version dependence).
 
 The map type we evaluate is 'jetvetomap' — the type the JSONs themselves
 document as "the recommended map for analyses", for both Run 2 and Run 3.
-Application differs by run period, per the JME prescription: Run 3 vetoes the
-whole EVENT if any jet lands in a veto region, Run 2 vetoes only the JETS
-themselves. See applyJetVetoMaps below for the per-jet gate.
+Application differs by run period, per the JME prescription: Run 3 vetoes the whole EVENT if any jet lands in a veto region, Run 2
+vetoes only the JETS themselves.
 Run 2 recommendations: https://cms-jerc.web.cern.ch/Recommendations/#run-2_1
 */
 struct EraVetoMap {
@@ -1583,24 +1582,18 @@ JET VETO MAPS
 */
 
 /*
-The per-jet gate differs between the two runs, following the JME prescriptions
-linked above. Both ask for pT > 15 GeV and chEmEF + neEmEF < 0.9; they differ in
-the jet ID and in the muon-overlap treatment:
+The per-jet gate differs between the two runs, following the JME prescriptions. 
+Both ask for pT > 15 GeV and chEmEF + neEmEF < 0.9; they differ in the jet ID 
+and in the muon-overlap treatment:
 
   Run 3 : tightLepVeto jet ID.
   Run 2 : tight jet ID, and jets overlapping a PF muon within dR < 0.2 are
-          EXEMPT from the veto (the recipe removes them from the check).
+          exempt from the veto.
 
 The ID cuts are written `>= 6` / `>= 2` rather than `== 6` / `== 2` so that both
 jetId encodings work: v >= 30 skims use the NanoAOD convention 2*tight +
 4*tightLepVeto (values 0/2/6), older skims set 3 = "tight, fails tightLepVeto"
-and 7 = "tight and tightLepVeto". tightLepVeto implies tight in both, so no value
-clears `>= 6` without the tightLepVeto bit. `== 6` silently matched nothing on a
-pre-v30 skim, disabling the veto map with no warning.
-
-Note the Run 2 tight cut matches the ID required by the good-AK4 selection
-(`Jet_jetId >= 2`, selections.cpp) — a jet cannot enter the analysis but be
-exempt from the veto that is supposed to clean it.
+and 7 = "tight and tightLepVeto".
 */
 RNode applyJetVetoMaps(RNode df) {
     auto eval_correction = [] (std::string year, bool isRun2, RVec<float> pt, RVec<float> eta, RVec<float> phi, RVec<float> jet_id, RVec<float> jet_nuEmEF, RVec<float> jet_chEmEF, RVec<float> muon_eta, RVec<float> muon_phi, RVec<bool> muon_isPFcand) {
@@ -1625,8 +1618,7 @@ RNode applyJetVetoMaps(RNode df) {
                 jet_veto_map.push_back(false);
                 continue;
             }
-            // Run 2 only: the recipe checks jets that do NOT overlap a PF muon within dR < 0.2.
-            // NanoAOD stores muons down to pT ~ 3 GeV, so softer PF muons are invisible here.
+            // Run 2 only: the recipe only checks jets that do not overlap a PF muon within dR < 0.2.
             if (isRun2) {
                 bool overlaps_pf_muon = false;
                 for (size_t j = 0; j < muon_eta.size(); j++) {
