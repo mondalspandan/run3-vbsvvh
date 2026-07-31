@@ -110,7 +110,7 @@ def main():
     parser.add_argument('-r', '--run',                 help = 'Which run (2 or 3)', choices=['2','3'])
     parser.add_argument('-p', '--prefix',              help = 'Prefix to append to the file paths', default="/ceph/cms/")
     parser.add_argument('-j', '--n-cores',             help = 'Number of cores (local) or CPUs per job (slurm/condor)', type=int, default=None)
-    parser.add_argument('-f', '--files-per-job',help = 'Number of input files per job (default: 10)', default=10, type=int)
+    parser.add_argument('-f', '--files-per-job',       help = 'Number of input files per job (default: 10)', default=10, type=int)
     parser.add_argument('-d', '--dry-run',             help = 'Do not actually execute the run command', action='store_true')
     parser.add_argument('--store-hlt',                 help = 'Store HLT trigger branches in output', action='store_true')
     parser.add_argument('--memory',                    help = 'Memory per job for slurm submission (default: 8gb)', default=None)
@@ -119,6 +119,7 @@ def main():
     parser.add_argument('--btag-eff',                  help = 'Write raw selected-AK4 b-tag efficiency histograms (MC only)', action='store_true')
     parser.add_argument('--year',                      help = 'Required metadata year for --btag-eff production')
     parser.add_argument('--skip-btag-sf',              help = 'Skip b-tag SF application (normally enabled)', action='store_true')
+    parser.add_argument('--qos',                       help = 'qos for slurm submission (slurm only)', default='avery')
     args = parser.parse_args()
     if args.btag_eff and not args.year:
         parser.error("--btag-eff requires --year (for example, --year 2024Prompt)")
@@ -225,7 +226,8 @@ def main():
                 time_flag = f" --time {args.time}" if args.time else ""
                 ncores_flag = f" -j {args.n_cores}" if args.n_cores else ""
                 year_flag = f" --year {args.year}" if args.btag_eff else ""
-                command = f"python3 slurm/submit.py -c {merged_json_name} -a {chan_name} --run_number {args.run} --files-per-job {args.files_per_job} -o {outdir}{year_flag}{hlt_flag}{btag_eff_flag}{skip_btag_sf_flag}{dry_run_flag}{memory_flag}{time_flag}{ncores_flag}{sample_flag}"
+                qos_flag = f" --qos {args.qos}" if args.qos else ""
+                command = f"python3 slurm/submit.py -c {merged_json_name} -a {chan_name} --run_number {args.run} --files-per-job {args.files_per_job} --account avery{qos_flag} -o {outdir}{year_flag}{hlt_flag}{btag_eff_flag}{skip_btag_sf_flag}{dry_run_flag}{memory_flag}{time_flag}{ncores_flag}{sample_flag}"
                 print(f"  -> Running command \"{command}\"...\n")
                 subprocess.run(command, shell=True, check=True)
 

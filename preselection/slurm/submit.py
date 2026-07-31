@@ -176,6 +176,10 @@ Examples:
                         help="Required metadata year for --btag-eff production")
     parser.add_argument("--skip-btag-sf", action="store_true",
                         help="Skip b-tag SF application (normally enabled)")
+    parser.add_argument("--account", default=None,
+                        help="SLURM account (e.g., avery)")
+    parser.add_argument("--qos", default=None,
+                        help="SLURM QoS (e.g., avery-b)")
     return parser.parse_args()
 
 
@@ -228,8 +232,8 @@ def create_job_config(sample_name: str, sample_config: Dict,
 
 
 def generate_slurm_script(task_dir: Path, job_dir: Path, job_name: str,
-                           args: argparse.Namespace,
-                           sample_name: str, job_idx: int) -> Path:
+                          args: argparse.Namespace,
+                          sample_name: str, job_idx: int) -> Path:
     """Generate a SLURM .sbatch script for a job."""
     script_path = job_dir / "job.sbatch"
     config_path = job_dir / "config.json"
@@ -247,6 +251,10 @@ def generate_slurm_script(task_dir: Path, job_dir: Path, job_name: str,
     if args.skip_btag_sf:
         extra_flags += " --skip-btag-sf"
 
+    # Add optional account and qos lines
+    acct_line = f"#SBATCH --account={args.account}\n" if args.account else ""
+    qos_line  = f"#SBATCH --qos={args.qos}\n" if args.qos else ""
+
     # Arguments for executable.sh:
     # TASK_DIR N_CPUS CONFIG_PATH OUTPUT_DIR ANALYSIS RUN_NUMBER SAMPLE_NAME JOB_IDX [EXTRA_FLAGS]
     exe_args = (f"{task_dir} {args.ncpus} {config_path} {args.output_dir} "
@@ -260,7 +268,7 @@ def generate_slurm_script(task_dir: Path, job_dir: Path, job_name: str,
 #SBATCH --time={args.time}
 #SBATCH --cpus-per-task={args.ncpus}
 #SBATCH --partition={args.partition}
-
+{acct_line}{qos_line}
 bash {task_dir}/executable.sh {exe_args}
 """
 
@@ -300,6 +308,10 @@ def generate_array_sbatch(task_dir: Path, job_entries: List[dict],
     if args.skip_btag_sf:
         extra_flags += " --skip-btag-sf"
 
+    # Add optional account and qos lines
+    acct_line = f"#SBATCH --account={args.account}\n" if args.account else ""
+    qos_line  = f"#SBATCH --qos={args.qos}\n" if args.qos else ""
+
     script_path = task_dir / "array.sbatch"
     script_content = f"""#!/bin/bash
 #SBATCH --job-name={task_dir.name}
@@ -307,6 +319,7 @@ def generate_array_sbatch(task_dir: Path, job_entries: List[dict],
 #SBATCH --time={args.time}
 #SBATCH --cpus-per-task={args.ncpus}
 #SBATCH --partition={args.partition}
+{acct_line}{qos_line}
 #SBATCH --array=0-{n_jobs - 1}
 #SBATCH --output={task_dir}/slurm_default_%A_%a.out
 #SBATCH --error={task_dir}/slurm_default_%A_%a.err
