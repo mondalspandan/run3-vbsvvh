@@ -42,8 +42,26 @@ RVec<bool> isbTagTight(std::string year, RVec<float> btag_score);
 MET CORRECTIONS
 ############################################
 */
+// Run 2 MET-φ (XY) correction. Runs AFTER applyType1MET and applyMETUnclusteredVariations
+// and Redefines the already-built MET in place — the nominal met_pt/met_phi AND every
+// variation present in the graph (JES, JER, UES). Correcting the nominal only leaves a
+// spurious nominal-vs-varied offset inside every MET shape systematic. No-op on Run 3
+// (metCorrections() has Run 2 entries only); warns once per unknown era.
 RNode applyMETPhiCorrections(RNode df, bool isData);
-RNode applyMETUnclusteredCorrections(RNode df, std::string variation);
+
+// MET unclustered energy (UES) ±1σ — MC only, systematics-gated.
+// MET = -Σ p_T over ALL PF candidates; the part clustered into Type-1 jets is covered by
+// JES/JER (already propagated by applyType1MET), while the unclustered remainder (soft
+// candidates, sub-threshold jets, pileup, HF) has its own scale uncertainty, computed by
+// CMSSW from exactly the candidates the Type-1 jet sum EXCLUDES. Disjoint by construction
+// ⇒ an independent nuisance that is never combined with a JES/JER shift, and whose shift
+// vector is JEC-invariant. Lifts that vector from the nano pre-shifted
+// PuppiMET_{pt,phi}Unclustered{Up,Down} and adds it to OUR rebuilt Type-1 MET, writing
+// met_pt_metunclUp/Dn + met_phi_metunclUp/Dn. No jet columns are produced — UES does not
+// move jets. Must run AFTER applyType1MET (it reads met_pt/met_phi) and BEFORE
+// applyMETPhiCorrections. Throws if the NanoAOD input lacks the branches (see the
+// hard-fail rationale in corrections.cpp).
+RNode applyMETUnclusteredVariations(RNode df, bool isData);
 
 /*
 ############################################
@@ -81,7 +99,7 @@ JERC era table in corrections.cpp (see the pinning rationale documented there).
 
 // Full Type-1 PuppiMET rebuild from RawPuppiMET over the merged AK4 list (Jet + CorrT1METJet)
 // with muon subtraction, per the JERC recipe. Writes met_pt / met_phi (nominal) and, on MC with
-// systematics enabled, met_pt_<sfx> / met_phi_<sfx> for each JES variation. Must run AFTER
+// systematics enabled, met_pt_<sfx> / met_phi_<sfx> for each JES and JER variation. Must run AFTER
 // applyJetEnergyCorrections / applyJetEnergyResolution / applyJESVariations (it consumes
 // Jet_jerFactor and the _Jet_var_<sfx> columns and re-evaluates the JEC compound) and after
 // _Jet_rawpt = (1-Jet_rawFactor)*Jet_pt has been defined on the pristine NanoAOD jets.
@@ -140,9 +158,20 @@ bool applyJetVetoMapsEnabled();
 //                               Consumers building per-variation selections should loop over
 //                               this and check column presence (variations are produced on MC
 //                               only today, and only by the correction steps that ran).
+//   unclusteredVariationSuffixes: {"metunclUp", "metunclDn"} — the MET-only UES suffixes.
+//                               Deliberately NOT folded into kinematicVariationSuffixes():
+//                               UES does not move jets, so there are no Jet_pt_<sfx> /
+//                               FatJet_pt_<sfx> columns, no per-variation good-jet masks and
+//                               no passes_<channel>_<sfx> flags. Downstream must use the
+//                               NOMINAL event selection together with the varied MET.
+//   metVariationSuffixes:       kinematic + unclustered — every suffix for which
+//                               met_pt_<sfx>/met_phi_<sfx> may exist. Consumed by
+//                               applyMETPhiCorrections, which presence-checks each one.
 std::vector<std::string> jesVariationSuffixes();
 std::vector<std::string> jerVariationSuffixes();
 std::vector<std::string> kinematicVariationSuffixes();
+std::vector<std::string> unclusteredVariationSuffixes();
+std::vector<std::string> metVariationSuffixes();
 
 // JER hybrid smearing (MC only). Defines Jet_jerFactor and redefines Jet_pt/Jet_mass to the
 // nominal-smeared values. With storeVariations, also writes the ±1σ SF variation branches

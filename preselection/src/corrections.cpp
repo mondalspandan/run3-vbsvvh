@@ -1059,6 +1059,20 @@ static const std::vector<JESSourceSpec> kJESRegroupedSources = {
     {"RelativeSampleYear",  "Regrouped_RelativeSample", true},
 };
 static const std::array<const char*, 2> kJESDirections = {"Up", "Dn"};
+
+// MET unclustered energy (UES) variation table: our column suffix ↔ the NanoAOD branch
+// token. The two deliberately differ. Ours follows this framework's Up/Dn convention and
+// carries a "metuncl" prefix so a MET-ONLY variation can never be mistaken for a
+// jet-level one — there are no Jet_pt_metuncl* / FatJet_pt_metuncl* columns, by design
+// (see unclusteredVariationSuffixes in corrections.h).
+struct UESVariationSpec {
+    const char* suffix;     // our column suffix, e.g. "metunclUp" → met_pt_metunclUp
+    const char* nanoToken;  // NanoAOD branch token, e.g. "UnclusteredUp" → PuppiMET_ptUnclusteredUp
+};
+static const std::array<UESVariationSpec, 2> kUESVariations = {{
+    {"metunclUp", "UnclusteredUp"},
+    {"metunclDn", "UnclusteredDown"},
+}};
 } // anonymous namespace
 
 RNode applyJESVariations(RNode df) {
@@ -1100,6 +1114,25 @@ std::vector<std::string> kinematicVariationSuffixes() {
     auto out = jesVariationSuffixes();
     auto jer = jerVariationSuffixes();
     out.insert(out.end(), jer.begin(), jer.end());
+    return out;
+}
+
+std::vector<std::string> unclusteredVariationSuffixes() {
+    if (!g_storeSysts) return {};
+    std::vector<std::string> out;
+    out.reserve(kUESVariations.size());
+    for (const auto& v : kUESVariations) out.push_back(v.suffix);
+    return out;
+}
+
+// Every suffix for which met_pt_<sfx> / met_phi_<sfx> may exist: the kinematic (JES+JER)
+// ones written by applyType1MET plus the MET-only UES ones. Deliberately NOT merged into
+// kinematicVariationSuffixes() — that list drives the per-variation JET columns and the
+// channel-pass flags in selections.cpp, which UES has none of.
+std::vector<std::string> metVariationSuffixes() {
+    auto out = kinematicVariationSuffixes();
+    auto uncl = unclusteredVariationSuffixes();
+    out.insert(out.end(), uncl.begin(), uncl.end());
     return out;
 }
 
@@ -1420,6 +1453,104 @@ RNode applyType1MET(RNode df, bool isData) {
 
 /*
 ############################################
+MET UNCLUSTERED ENERGY (UES) VARIATIONS
+############################################
+
+MET = -Σ p⃗_T over ALL PF candidates, and for systematics that sum splits into two DISJOINT
+pieces. The CLUSTERED part — the candidates inside the >15 GeV, low-EM-fraction AK4 jets
+that enter the Type-1 correction above — carries JES/JER, already propagated by
+applyType1MET. The UNCLUSTERED remainder (soft candidates, sub-threshold jets, pileup
+remnants, HF deposits) has a scale uncertainty of its own, computed in CMSSW by
+pat::MET::shiftedP4(UnclusteredEnUp/Down): each PF-candidate category is varied by its own
+uncertainty (charged hadrons 1%, neutral hadrons 10%, photons 1%, HF hadronic 20%, HF EM
+20%) and the categories are summed in quadrature. CMSSW explicitly EXCLUDES candidates
+already inside a Type-1 jet, so UES does NOT double-count JES. Three consequences, because
+they are easy to get wrong:
+  - under a JES or JER variation, the unclustered part stays nominal;
+  - under a UES variation, the jets stay nominal;
+  - the shifts are NEVER combined. One variation at a time, each its own fit nuisance.
+
+Being disjoint from the jet sum also makes the shift JEC-invariant, which is what lets it
+be lifted from NanoAOD as a VECTOR and added to OUR rebuilt Type-1 MET. The nano
+pre-shifted MET cannot be used directly as the varied MET: it is built on NANO's JEC, so
+using it would silently revert this framework's jet calibration inside the UES templates
+only. Taking the difference is what cancels nano's JEC:
+
+  dx± = PuppiMET_ptUnclustered±·cos(PuppiMET_phiUnclustered±) - PuppiMET_pt·cos(PuppiMET_phi)
+  dy± = PuppiMET_ptUnclustered±·sin(PuppiMET_phiUnclustered±) - PuppiMET_pt·sin(PuppiMET_phi)
+  px± = met_pt·cos(met_phi) + dx±,    py± = met_pt·sin(met_phi) + dy±
+
+BOTH directions are read from the file. The "Down = -Up" trick was forced by the legacy
+NanoAOD format, which stored only the +1σ delta (MET_MetUnclustEnUpDeltaX/Y — gone in v15,
+where the MET_* collection was renamed PFMET_*). Measured on a v15 Run 2 skim,
+|d⃗_up + d⃗_dn| has a mean of 0.06 GeV against a typical |d⃗| of 1.4 GeV: close to
+antisymmetric, but not exactly.
+
+Precision note, so it is not rediscovered as a bug: nano stores PuppiMET_phi with ~12
+mantissa bits and the Unclustered pt with ~10, so the differences above carry ~0.05 GeV of
+rounding per component — a few percent of a typical 1.4 GeV shift, and unbiased. That is
+intrinsic to the delta-extraction recipe (coffea's CorrectedMETFactory path shares it);
+NanoAOD offers nothing more precise.
+
+Runs AFTER applyType1MET and BEFORE applyMETPhiCorrections, so met_pt/met_phi here are the
+pre-φ-corrected Type-1 rebuild — the consistent baseline, since the nano delta is itself
+defined relative to an un-φ-corrected MET. The φ correction is then applied to the nominal
+and to these variations alike, by applyMETPhiCorrections below.
+*/
+
+RNode applyMETUnclusteredVariations(RNode df, bool isData) {
+    if (isData) return df;                                  // MC-only nuisance
+    if (unclusteredVariationSuffixes().empty()) return df;   // --no_systs
+
+    // Hard-fail rather than warn-and-skip. Silently dropping these columns produces output
+    // that LOOKS complete but carries no UES template at all, and the omission would only
+    // surface at datacard time — the same failure mode the jet veto map era check below was
+    // written to remove. Every Run 2 (RunIISummer20UL*NanoAODv15 re-nano) and Run 3 input
+    // in etc/input_sample_jsons was checked and carries these branches, so a file without
+    // them is a genuine input-version error, not a supported configuration.
+    for (const char* b : {"PuppiMET_pt", "PuppiMET_phi",
+                          "PuppiMET_ptUnclusteredUp",   "PuppiMET_phiUnclusteredUp",
+                          "PuppiMET_ptUnclusteredDown", "PuppiMET_phiUnclusteredDown"}) {
+        if (!df.HasColumn(b))
+            throw std::runtime_error(
+                std::string("MET unclustered (UES): input is missing branch '") + b
+                + "'. NanoAOD v15 ships the pre-shifted MET under these names; the legacy "
+                  "v9/v12 delta branches (MET_MetUnclustEnUpDeltaX/Y) no longer exist and "
+                  "the MET_* collection was renamed PFMET_*. Either the input predates v15 "
+                  "or the skim dropped the branches — use --no_systs if a nominal-only "
+                  "production is really what is wanted.");
+    }
+
+    // One lambda for both directions: the nano direction is carried by the input column
+    // names, so Up and Dn are produced by identical code.
+    auto shift_met = [](float met_pt, float met_phi,
+                        float nano_pt, float nano_phi,
+                        float nano_pt_var, float nano_phi_var) {
+        const double dx = (double)nano_pt_var * std::cos((double)nano_phi_var)
+                        - (double)nano_pt     * std::cos((double)nano_phi);
+        const double dy = (double)nano_pt_var * std::sin((double)nano_phi_var)
+                        - (double)nano_pt     * std::sin((double)nano_phi);
+        const double px = (double)met_pt * std::cos((double)met_phi) + dx;
+        const double py = (double)met_pt * std::sin((double)met_phi) + dy;
+        return std::make_pair(static_cast<float>(std::hypot(px, py)),
+                              static_cast<float>(std::atan2(py, px)));
+    };
+
+    for (const auto& v : kUESVariations) {
+        const std::string sfx    = v.suffix;
+        const std::string metCol = "_uncl_met_" + sfx;
+        df = df.Define(metCol, shift_met,
+                       {"met_pt", "met_phi", "PuppiMET_pt", "PuppiMET_phi",
+                        std::string("PuppiMET_pt")  + v.nanoToken,
+                        std::string("PuppiMET_phi") + v.nanoToken});
+        df = df.Define("met_pt_"  + sfx, "(float)" + metCol + ".first");
+        df = df.Define("met_phi_" + sfx, "(float)" + metCol + ".second");
+    }
+    return df;
+}
+
+/*
+############################################
 MET PHI CORRECTIONS
 ############################################
 */
@@ -1449,13 +1580,40 @@ RNode applyMETPhiCorrections(RNode df, bool isData) {
         
         return std::make_pair(static_cast<float>(pt_corr), static_cast<float>(phi_corr));
     };
-    // Runs AFTER applyType1MET, so it refines the already-rebuilt (met_pt, met_phi) rather than
-    // starting from PuppiMET. Run 3 has no met.json configured (see metCorrections in
-    // corrections.cpp) → no-op there;
-    // the φ correction currently only touches the nominal MET, not the JES-varied copies.
-    return df.Define("_MET_phicorr", eval_correction, {"year", "met_pt", "met_phi", "PV_npvs", "run"})
-            .Redefine("met_pt",  "_MET_phicorr.first")
-            .Redefine("met_phi", "_MET_phicorr.second");
+    // Runs AFTER applyType1MET + applyMETUnclusteredVariations, so it refines the
+    // already-rebuilt MET rather than starting from PuppiMET. Run 3 has no met.json
+    // configured (see metCorrections above) → eval_correction warns once and passes through.
+    //
+    // Applied to the nominal MET *and* to every MET variation (JES, JER, UES). Correcting
+    // only the nominal — the previous behaviour — left a spurious nominal-vs-varied offset
+    // inside every MET shape systematic: the varied columns carried an un-φ-corrected MET
+    // while the nominal did not, so part of each "JES"/"JER"/"UES" shape was in fact the
+    // missing φ correction. No-op on Run 3, a real effect on Run 2 where the JSONs load.
+    //
+    // Variations are presence-checked rather than assumed: they are MC-only and only with
+    // systematics enabled, so on data or under --no_systs the loop body never runs.
+    // Deriving the set from the columns the MET path actually defined means there is no
+    // flag to keep in sync — same discipline as activeKinVariations() in selections.cpp.
+    auto correct_one = [&eval_correction](RNode d, const std::string& sfx) {
+        const std::string tail   = sfx.empty() ? std::string{} : "_" + sfx;
+        const std::string ptCol  = "met_pt"  + tail;
+        const std::string phiCol = "met_phi" + tail;
+        const std::string helper = "_MET_phicorr" + tail;
+        // The helper is Defined against the PRE-correction (pt, phi), then the columns are
+        // Redefined from it. RDF's graph is functional, so this is not a cycle: the helper
+        // node resolves ptCol/phiCol at its own position, and each Redefine creates a new
+        // node downstream of it.
+        d = d.Define(helper, eval_correction, {"year", ptCol, phiCol, "PV_npvs", "run"});
+        return d.Redefine(ptCol,  helper + ".first")
+                .Redefine(phiCol, helper + ".second");
+    };
+
+    df = correct_one(df, "");
+    for (const auto& sfx : metVariationSuffixes()) {
+        if (!df.HasColumn("met_pt_" + sfx) || !df.HasColumn("met_phi_" + sfx)) continue;
+        df = correct_one(df, sfx);
+    }
+    return df;
 }
 
 /*
@@ -1660,27 +1818,6 @@ RNode applyJetVetoMaps(RNode df) {
 
 /*
 ############################################
-MET UNCLUSTERED CORRECTIONS
-############################################
-*/
-
-RNode applyMETUnclusteredCorrections(RNode df, std::string variation) {
-    if (variation == "up") {
-        return df.Define("_MET_uncert_dx", "met_pt * TMath::Cos(met_phi) + MET_MetUnclustEnUpDeltaX")
-                .Define("_MET_uncert_dy", "met_pt * TMath::Sin(met_phi) + MET_MetUnclustEnUpDeltaY")
-                .Redefine("met_pt", "(float)TMath::Sqrt(_MET_uncert_dx * _MET_uncert_dx + _MET_uncert_dy * _MET_uncert_dy)");
-    }
-
-    else if (variation == "down") {
-        return df.Define("_MET_uncert_dx", "met_pt * TMath::Cos(met_phi) - MET_MetUnclustEnUpDeltaX")
-                .Define("_MET_uncert_dy", "met_pt * TMath::Sin(met_phi) - MET_MetUnclustEnUpDeltaY")
-                .Redefine("met_pt", "(float)TMath::Sqrt(_MET_uncert_dx * _MET_uncert_dx + _MET_uncert_dy * _MET_uncert_dy)");
-    }
-    return df;
-}
-
-/*
-############################################
 JET MASS SCALE (JMS) AND RESOLUTION (JMR) — generic, per-mass-column
 ############################################
 
@@ -1830,8 +1967,12 @@ RNode applyMCCorrections(RNode df_) {
     // (defines _Jet_var_<sfx>, consumed by applyType1MET for the per-variation MET).
     if (g_storeSysts) df = applyJESVariations(df);
     // Rebuild Type-I MET from RawPuppiMET over Jet + CorrT1METJet, for the nominal and every
-    // JES variation, then apply the Run 2 MET-φ correction on top of the nominal MET.
+    // JES/JER variation.
     df = applyType1MET(df, /*isData=*/false);
+    // UES ±1σ on top of the rebuilt Type-I MET, BEFORE the φ correction: the nano shift
+    // vector is itself defined relative to an un-φ-corrected MET. The φ correction is then
+    // applied to the nominal and to every variation (JES, JER, UES) alike.
+    df = applyMETUnclusteredVariations(df, /*isData=*/false);
     df = applyMETPhiCorrections(df, false);
     // GloParT JMS/JMR would be wired here via applyJetMassScale / applyJetMassResolution
     // once the calibration is derived. FatJet_msoftdrop is intentionally not calibrated
