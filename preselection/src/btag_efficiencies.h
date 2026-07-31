@@ -9,9 +9,9 @@
 
 using RNode = ROOT::RDF::RNode;
 
-// Write signed nominal-MC-weighted selected-AK4 jet yields for the b-tag
-// efficiency workflow. The converter combines job outputs before calculating
-// efficiencies.
+// Write schema-v2 signed nominal-MC-weighted selected-AK4 jet yields for the
+// ordered L/M/T/XT/XXT working points and their exclusive categories. The
+// converter combines job outputs before calculating efficiencies.
 void saveBTagEfficiencyHistograms(RNode df, const std::string &output_dir,
                                   const std::string &output_name,
                                   const std::string &channel,

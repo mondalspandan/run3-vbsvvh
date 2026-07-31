@@ -206,6 +206,14 @@ std::unordered_map<std::string, float> makeBtagWPMap(const std::string& wp) {
 const std::unordered_map<std::string, float>& btaggingWPMap_Loose()  { static const auto m = makeBtagWPMap("L"); return m; }
 const std::unordered_map<std::string, float>& btaggingWPMap_Medium() { static const auto m = makeBtagWPMap("M"); return m; }
 const std::unordered_map<std::string, float>& btaggingWPMap_Tight()  { static const auto m = makeBtagWPMap("T"); return m; }
+const std::unordered_map<std::string, float>& btaggingWPMap_ExtraTight() {
+    static const auto m = makeBtagWPMap("XT");
+    return m;
+}
+const std::unordered_map<std::string, float>& btaggingWPMap_ExtraExtraTight() {
+    static const auto m = makeBtagWPMap("XXT");
+    return m;
+}
 
 // --- MET φ corrections ------------------------------------------------------------------
 
@@ -313,6 +321,14 @@ RVec<bool> isbTagMedium(std::string year, RVec<float> btag_score) {
 
 RVec<bool> isbTagTight(std::string year, RVec<float> btag_score) {
     return btag_score > btaggingWPMap_Tight().at(year);
+}
+
+RVec<bool> isbTagExtraTight(std::string year, RVec<float> btag_score) {
+    return btag_score > btaggingWPMap_ExtraTight().at(year);
+}
+
+RVec<bool> isbTagExtraExtraTight(std::string year, RVec<float> btag_score) {
+    return btag_score > btaggingWPMap_ExtraExtraTight().at(year);
 }
 
 /*

@@ -3,9 +3,22 @@
 
 #pragma once
 
+#include <array>
 #include <string>
+#include <string_view>
 #include <cmath>
 #include <algorithm>
+
+// Canonical UParTAK4 working-point order, from loosest to tightest.  Keep this
+// definition shared by efficiency production and runtime SF application.
+inline constexpr std::array<std::string_view, 5> kBTagInclusiveWorkingPoints = {
+    "L", "M", "T", "XT", "XXT"
+};
+
+// Mutually exclusive observed categories corresponding to the ordered WPs.
+inline constexpr std::array<std::string_view, 6> kBTagExclusiveCategories = {
+    "N", "LnotM", "MnotT", "TnotXT", "XTnotXXT", "XXT"
+};
 
 inline double bTagMaxAbsEta(const std::string &year) {
     return (year == "2016preVFP" || year == "2016postVFP") ? 2.4 : 2.5;

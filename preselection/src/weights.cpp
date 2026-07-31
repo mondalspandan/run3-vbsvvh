@@ -93,6 +93,71 @@ struct BTagWeightBundle {
     RVec<double> lf_correlated = {1., 1., 1.};
 };
 
+using BTagWPValues = std::array<double, kBTagInclusiveWorkingPoints.size()>;
+
+double unityForInvalidBTagWeight(std::atomic<unsigned long long> &counter);
+
+std::string bTagObservedCategory(const std::array<bool, kBTagInclusiveWorkingPoints.size()> &passed) {
+    if (passed[4]) return "XXT";
+    if (passed[3]) return "XTnotXXT";
+    if (passed[2]) return "TnotXT";
+    if (passed[1]) return "MnotT";
+    if (passed[0]) return "LnotM";
+    return "N";
+}
+
+int bTagTightestPassed(const std::array<bool, kBTagInclusiveWorkingPoints.size()> &passed) {
+    for (int index = static_cast<int>(passed.size()) - 1; index >= 0; --index)
+        if (passed[static_cast<std::size_t>(index)]) return index;
+    return -1;
+}
+
+double bTagCategoryWeight(const BTagWPValues &sf, const BTagWPValues &eff,
+                          const std::array<bool, kBTagInclusiveWorkingPoints.size()> &passed,
+                          std::string_view source, const char *direction,
+                          const char *flavor) {
+    const std::string category = bTagObservedCategory(passed);
+    const auto fail = [&](const char *reason, std::atomic<unsigned long long> &counter) {
+        recordBTagFailure(reason, source, direction, flavor, category.c_str());
+        return unityForInvalidBTagWeight(counter);
+    };
+    for (std::size_t index = 0; index < passed.size(); ++index) {
+        if (!std::isfinite(sf[index]) || !std::isfinite(eff[index]))
+            return fail("invalid_probability", g_btag_invalid_probability);
+        if (index > 0 && passed[index] && !passed[index - 1])
+            return fail("nonnested_working_points", g_btag_invalid_probability);
+        if (!(0. <= eff[index] && eff[index] <= 1.))
+            return fail("invalid_probability", g_btag_invalid_probability);
+    }
+    for (std::size_t index = 1; index < eff.size(); ++index)
+        if (eff[index - 1] < eff[index])
+            return fail("invalid_probability", g_btag_invalid_probability);
+
+    BTagWPValues q{};
+    for (std::size_t index = 0; index < q.size(); ++index) {
+        q[index] = sf[index] * eff[index];
+        if (!std::isfinite(q[index]) || q[index] < 0. || q[index] > 1.)
+            return fail("invalid_probability", g_btag_invalid_probability);
+        if (index > 0 && q[index - 1] < q[index])
+            return fail("invalid_probability", g_btag_invalid_probability);
+    }
+
+    const int passed_index = bTagTightestPassed(passed);
+    if (passed_index < 0) {
+        if (std::abs(1. - eff[0]) < kBTagDenominatorEpsilon)
+            return fail("tiny_denominator", g_btag_tiny_denominator);
+        return (1. - q[0]) / (1. - eff[0]);
+    }
+    if (passed_index == static_cast<int>(passed.size()) - 1) return sf.back();
+    const std::size_t next = static_cast<std::size_t>(passed_index + 1);
+    if (q[static_cast<std::size_t>(passed_index)] < q[next])
+        return fail("negative_intermediate", g_btag_negative_intermediate);
+    if (std::abs(eff[static_cast<std::size_t>(passed_index)] - eff[next]) < kBTagDenominatorEpsilon)
+        return fail("tiny_denominator", g_btag_tiny_denominator);
+    return (q[static_cast<std::size_t>(passed_index)] - q[next]) /
+           (eff[static_cast<std::size_t>(passed_index)] - eff[next]);
+}
+
 std::size_t bTagHFSourceIndex(std::string_view source) {
     const auto it = std::find(kBTagHFSources.begin(), kBTagHFSources.end(), source);
     if (it == kBTagHFSources.end()) throw std::runtime_error("Unknown HF b-tag source " + std::string(source));
@@ -535,9 +600,13 @@ RNode applyBTaggingScaleFactors(std::unordered_map<std::string, correction::Corr
     auto evaluate_bundle = [cset_btag, corrname_map_HF, corrname_map_LF, channel, nuisance_year]
         (const std::string &year, const std::string &sample, const RVec<float> &eta,
          const RVec<float> &pt, const RVec<unsigned char> &jetflavor,
-         const RVec<bool> &is_tight, const RVec<bool> &is_loose) {
+         const RVec<bool> &is_loose, const RVec<bool> &is_medium,
+         const RVec<bool> &is_tight, const RVec<bool> &is_extra_tight,
+         const RVec<bool> &is_extra_extra_tight) {
         if (eta.size() != pt.size() || eta.size() != jetflavor.size() ||
-            eta.size() != is_tight.size() || eta.size() != is_loose.size())
+            eta.size() != is_loose.size() || eta.size() != is_medium.size() ||
+            eta.size() != is_tight.size() || eta.size() != is_extra_tight.size() ||
+            eta.size() != is_extra_extra_tight.size())
             throw std::runtime_error("B-tag input collections have inconsistent sizes");
         const auto sf_set = cset_btag.find(year);
         const auto eff_set = cset_btag.find("eff_" + year);
@@ -555,68 +624,62 @@ RNode applyBTaggingScaleFactors(std::unordered_map<std::string, correction::Corr
         try { efficiency = eff_set->second.at(efficiency_name); }
         catch (...) { throw std::runtime_error("B-tag efficiency correction is unavailable for year=" + year +
                                                 ", requested_correction=" + efficiency_name); }
-        try { (void)efficiency->evaluate({efficiency_sample, "B", "T", 30., 0.}); }
-        catch (...) { throw std::runtime_error("B-tag efficiency sample key is unavailable for year=" + year +
-                                                ", sample=" + sample + ", final_sample=" + efficiency_sample); }
+        for (const auto flavor : {std::string("B"), std::string("C"), std::string("L")}) {
+            for (const auto wp : kBTagInclusiveWorkingPoints) {
+                try { (void)efficiency->evaluate({efficiency_sample, flavor, std::string(wp), 30., 0.}); }
+                catch (...) {
+                    throw std::runtime_error("B-tag efficiency payload is missing flavor=" + flavor +
+                                             ", WP=" + std::string(wp) + ", year=" + year +
+                                             ", requested_channel=" + channel +
+                                             ", final_channel=" + efficiency_channel + ", sample=" + sample +
+                                             ", final_sample_family=" + efficiency_sample +
+                                             ", correction=" + efficiency_name);
+                }
+            }
+        }
 
         BTagWeightBundle bundle;
         for (auto &weights : bundle.hf) weights = {1., 1., 1.};
         const auto &hf_sf = sf_set->second.at(hf_name->second);
         const auto &lf_sf = sf_set->second.at(lf_name->second);
-        const auto category_weight = [](double sf_t, double sf_l, double eff_t, double eff_l,
-                                        bool tight, bool loose, const std::string &source,
-                                        const char *direction, const char *flavor, const char *category) {
-            const auto fail = [&](const char *reason, std::atomic<unsigned long long> &counter) {
-                recordBTagFailure(reason, source, direction, flavor, category);
-                return unityForInvalidBTagWeight(counter);
-            };
-            if (!std::isfinite(sf_t) || !std::isfinite(sf_l) || !std::isfinite(eff_t) || !std::isfinite(eff_l) ||
-                !(0. <= eff_t && eff_t <= eff_l && eff_l <= 1.)) return fail("invalid_probability", g_btag_invalid_probability);
-            const double q_t = sf_t * eff_t, q_l = sf_l * eff_l;
-            if (!std::isfinite(q_t) || !std::isfinite(q_l) || !(0. <= q_t && q_t <= q_l && q_l <= 1.))
-                return fail("invalid_probability", g_btag_invalid_probability);
-            if (tight) return sf_t;
-            if (loose) {
-                if (q_l - q_t < 0.) return fail("negative_intermediate", g_btag_negative_intermediate);
-                if (std::abs(eff_l - eff_t) < kBTagDenominatorEpsilon) return fail("tiny_denominator", g_btag_tiny_denominator);
-                return (q_l - q_t) / (eff_l - eff_t);
-            }
-            if (1. - q_l < 0.) return fail("invalid_probability", g_btag_invalid_probability);
-            if (std::abs(1. - eff_l) < kBTagDenominatorEpsilon) return fail("tiny_denominator", g_btag_tiny_denominator);
-            return (1. - q_l) / (1. - eff_l);
-        };
-
         for (std::size_t jet = 0; jet < pt.size(); ++jet) {
             const int flavor = std::abs(jetflavor[jet]);
             if (std::abs(eta[jet]) >= bTagMaxAbsEta(year)) continue;
             const bool heavy = flavor == 5 || flavor == 4;
             const char *label = flavor == 5 ? "B" : (flavor == 4 ? "C" : "L");
-            if (is_tight[jet] && !is_loose[jet]) {
-                recordBTagFailure("tight_not_loose", "central", "central", label, "invalid");
-                ++g_btag_invalid_probability;
-                continue;
-            }
-            const char *category = is_tight[jet] ? "T" : (is_loose[jet] ? "LnotT" : "untagged");
-            const double eff_t = efficiency->evaluate({efficiency_sample, label, "T", pt[jet], eta[jet]});
-            const double eff_l = efficiency->evaluate({efficiency_sample, label, "L", pt[jet], eta[jet]});
+            const std::array<bool, kBTagInclusiveWorkingPoints.size()> passed = {
+                is_loose[jet], is_medium[jet], is_tight[jet],
+                is_extra_tight[jet], is_extra_extra_tight[jet]
+            };
+            BTagWPValues efficiencies{};
+            for (std::size_t index = 0; index < efficiencies.size(); ++index)
+                efficiencies[index] = efficiency->evaluate({efficiency_sample, label,
+                                                              std::string(kBTagInclusiveWorkingPoints[index]),
+                                                              pt[jet], eta[jet]});
             const int sf_flavor = heavy ? flavor : 0;
             const auto &sf = heavy ? hf_sf : lf_sf;
             const double sf_eta = bTagSFAbsEta(year, eta[jet]);
-            const auto central = [&](const char *wp) { return sf->evaluate({"central", wp, sf_flavor, sf_eta, pt[jet]}); };
-            const double central_t = central("T"), central_l = central("L");
-            const double central_weight = category_weight(central_t, central_l, eff_t, eff_l, is_tight[jet], is_loose[jet],
-                                                          "central", "central", label, category);
+            const auto evaluate_sf = [&](const std::string &systematic, int sf_flavor_value) {
+                BTagWPValues values{};
+                for (std::size_t index = 0; index < values.size(); ++index)
+                    values[index] = sf->evaluate({systematic,
+                                                  std::string(kBTagInclusiveWorkingPoints[index]),
+                                                  sf_flavor_value, sf_eta, pt[jet]});
+                return values;
+            };
+            const BTagWPValues central_sf = evaluate_sf("central", sf_flavor);
+            const double central_weight = bTagCategoryWeight(central_sf, efficiencies, passed,
+                                                              "central", "central", label);
             if (!heavy) {
                 for (const auto source : {std::string("uncorrelated"), std::string("correlated")}) {
-                    const auto shifted = [&](const char *direction, const char *wp, double central_sf) {
-                        return sf->evaluate({std::string(direction) + "_" + source, wp, sf_flavor, sf_eta, pt[jet]});
-                    };
                     auto &weights = source == "uncorrelated" ? bundle.lf_uncorrelated : bundle.lf_correlated;
                     weights[0] *= central_weight;
-                    weights[1] *= category_weight(shifted("up", "T", central_t), shifted("up", "L", central_l), eff_t, eff_l,
-                                                  is_tight[jet], is_loose[jet], source, "up", label, category);
-                    weights[2] *= category_weight(shifted("down", "T", central_t), shifted("down", "L", central_l), eff_t, eff_l,
-                                                  is_tight[jet], is_loose[jet], source, "down", label, category);
+                    for (const auto direction : {std::string("up_"), std::string("down_")}) {
+                        const auto shifted_sf = evaluate_sf(direction + source, sf_flavor);
+                        const double shifted_weight = bTagCategoryWeight(shifted_sf, efficiencies, passed,
+                                                                          source, direction == "up_" ? "up" : "down", label);
+                        weights[direction == "up_" ? 1 : 2] *= shifted_weight;
+                    }
                 }
                 continue;
             }
@@ -625,28 +688,35 @@ RNode applyBTaggingScaleFactors(std::unordered_map<std::string, correction::Corr
                 auto &weights = bundle.hf[index];
                 weights[0] *= central_weight;
                 if (!bTagHFSourceAvailable(year, source)) { weights[1] *= central_weight; weights[2] *= central_weight; continue; }
-                const auto shifted = [&](const char *direction, const char *wp, double central_sf) {
-                    try {
-                        const double payload = hf_sf->evaluate({std::string(direction) + "_" + source, wp, flavor,
-                                                                 sf_eta, pt[jet]});
-                        return flavor == 4 ? central_sf + 2. * (payload - central_sf) : payload;
-                    } catch (const std::exception &error) {
-                        throw std::runtime_error("B-tag SF evaluation failed for year=" + year + ", source=" + source +
-                                                 ", direction=" + direction + ", flavor=" + std::to_string(flavor) +
-                                                 ", wp=" + wp + ": " + error.what());
+                for (const auto direction : {std::string("up_"), std::string("down_")}) {
+                    BTagWPValues shifted_sf{};
+                    for (std::size_t wp = 0; wp < shifted_sf.size(); ++wp) {
+                        try {
+                            const double payload = hf_sf->evaluate({direction + source,
+                                                                     std::string(kBTagInclusiveWorkingPoints[wp]),
+                                                                     flavor, sf_eta, pt[jet]});
+                            shifted_sf[wp] = flavor == 4 ? central_sf[wp] + 2. * (payload - central_sf[wp]) : payload;
+                        } catch (const std::exception &error) {
+                            throw std::runtime_error("B-tag SF evaluation failed for year=" + year + ", source=" + source +
+                                                     ", direction=" + direction + ", flavor=" + std::to_string(flavor) +
+                                                     ", wp=" + std::string(kBTagInclusiveWorkingPoints[wp]) +
+                                                     ": " + error.what());
+                        }
                     }
-                };
-                weights[1] *= category_weight(shifted("up", "T", central_t), shifted("up", "L", central_l), eff_t, eff_l,
-                                              is_tight[jet], is_loose[jet], source, "up", label, category);
-                weights[2] *= category_weight(shifted("down", "T", central_t), shifted("down", "L", central_l), eff_t, eff_l,
-                                              is_tight[jet], is_loose[jet], source, "down", label, category);
+                    const double shifted_weight = bTagCategoryWeight(
+                        shifted_sf, efficiencies, passed, source,
+                        direction == "up_" ? "up" : "down", label);
+                    weights[direction == "up_" ? 1 : 2] *= shifted_weight;
+                }
             }
         }
         return bundle;
     };
 
     auto result = df.Define("_btagging_sf_bundle", evaluate_bundle,
-                            {"year", "name", "jet_eta", "jet_pt", "jet_hadronFlavour", "jet_isTightBTag", "jet_isLooseBTag"});
+                            {"year", "name", "jet_eta", "jet_pt", "jet_hadronFlavour",
+                             "jet_isLooseBTag", "jet_isMediumBTag", "jet_isTightBTag",
+                             "jet_isExtraTightBTag", "jet_isExtraExtraTightBTag"});
     for (const auto source : kBTagHFSources) {
         const std::string source_name(source);
         const auto index = bTagHFSourceIndex(source);

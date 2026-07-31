@@ -274,7 +274,9 @@ RNode AK4JetProperties(RNode df_)
     df_ = applyJetVetoMaps(df_);
     return df_.Define("Jet_isTightBTag", isbTagTight, {"year", "Jet_btagUParTAK4B"})
               .Define("Jet_isMediumBTag", isbTagMedium, {"year", "Jet_btagUParTAK4B"})
-              .Define("Jet_isLooseBTag", isbTagLoose, {"year", "Jet_btagUParTAK4B"});
+              .Define("Jet_isLooseBTag", isbTagLoose, {"year", "Jet_btagUParTAK4B"})
+              .Define("Jet_isExtraTightBTag", isbTagExtraTight, {"year", "Jet_btagUParTAK4B"})
+              .Define("Jet_isExtraExtraTightBTag", isbTagExtraExtraTight, {"year", "Jet_btagUParTAK4B"});
 }
 
 

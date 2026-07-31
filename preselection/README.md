@@ -66,8 +66,9 @@ There are examples in `run_wrapper.sh` for running `run_rdf.py` either locally o
 ## B-tag efficiency production
 
 Use the MC-only `--btag-eff` mode to run the normal channel preselection and
-write signed nominal-MC-weighted selected-AK4 jet yields (B/C/light denominator
-plus tight, loose, loose-not-tight, and untagged numerators).  The all-channel/all-sample batch
+write signed nominal-MC-weighted selected-AK4 jet yields (B/C/light denominator,
+inclusive L/M/T/XT/XXT states, and exclusive N/LnotM/MnotT/TnotXT/XTnotXXT/XXT
+categories).  The all-channel/all-sample batch
 command is shown, commented out, in `run_wrapper.sh`:
 
 ```bash
@@ -174,8 +175,16 @@ python3 ../misc/sf-utils/plot-btag-eff-years.py \
 # this file from each sample's metadata year; keep the year suffix.
 ```
 
-Compatibility uses independent T/LT/N categories and weighted-binomial
-MC-statistical uncertainties; it is a diagnostic, not a formal hypothesis test.
+The event reweighting uses the ordered adjacent-WP formula: XXT jets use
+SF_XXT; a jet passing WP i but failing the next tighter WP uses
+`(SF_i*eps_i - SF_(i+1)*eps_(i+1))/(eps_i-eps_(i+1))`; jets failing L use
+`(1-SF_L*eps_L)/(1-eps_L)`.  Systematic sources evaluate all five WPs
+coherently, with the existing public nuisance-branch count and central/up/down
+ordering unchanged. Compatibility uses the six mutually exclusive categories
+N/LnotM/MnotT/TnotXT/XTnotXXT/XXT and weighted-binomial MC-statistical
+uncertainties; it is a diagnostic, not a formal hypothesis test. New raw
+schema-v2 outputs must be produced before final payloads can contain M, XT, and
+XXT; old L/T-only ROOT files are rejected by the converter.
 During conversion, a pathological signed-weight pT bin is merged with its
 immediately lower neighbor and the merged efficiency is assigned to both bins;
 an irreparable first-bin pathology still uses the validated all-MC fallback.

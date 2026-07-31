@@ -21,9 +21,9 @@ from btag_eff_families import (excluded_source_channels, final_channel,
 
 
 FLAVORS = ("b", "c", "light")
-WORKING_POINTS = ("T", "L", "LT", "N")
-EXCLUSIVE_CATEGORIES = ("T", "LT", "N")
-HISTOGRAM_NAMES = {"T": "T", "L": "L", "LT": "LT", "N": "N"}
+INCLUSIVE_WPS = ("L", "M", "T", "XT", "XXT")
+EXCLUSIVE_CATEGORIES = ("N", "LnotM", "MnotT", "TnotXT", "XTnotXXT", "XXT")
+HISTOGRAM_STATES = ("den", *INCLUSIVE_WPS, "LnotM", "MnotT", "TnotXT", "XTnotXXT", "N")
 
 
 def parse_args():
@@ -122,8 +122,12 @@ def read_merged_histograms(paths, expected_year, expected_channel, expected_samp
                 actual_value = root_file[key].member("fTitle")
                 if actual_value != expected_value:
                     raise ValueError(f"{path} has {key}={actual_value!r}, expected {expected_value!r}")
+            if "btag_eff_schema_version" not in root_file or root_file["btag_eff_schema_version"].member("fTitle") != "2":
+                raise ValueError(f"{path} is not a schema-v2 five-working-point b-tag efficiency file")
+            if "btag_eff_working_points" not in root_file or root_file["btag_eff_working_points"].member("fTitle") != ",".join(INCLUSIVE_WPS):
+                raise ValueError(f"{path} does not declare the canonical working points {','.join(INCLUSIVE_WPS)}")
             for flavor in FLAVORS:
-                for state in ("den", *WORKING_POINTS):
+                for state in HISTOGRAM_STATES:
                     hist_name = f"btag_{flavor}_{state}"
                     if hist_name not in root_file:
                         raise ValueError(f"{path} does not contain {hist_name}")
@@ -243,41 +247,60 @@ def discover_family_histograms(input_dir, year, channel, job_manifest=None, conf
     return grouped_counts, grouped_variances, grouped_edges, members, completeness
 
 
-def invalid_count_bins(counts):
+def invalid_count_bins(counts, variances=None):
     """Return per-flavor masks for bins that cannot form physical efficiencies."""
     masks = {}
     for flavor in FLAVORS:
         denominator = counts[(flavor, "den")]
-        tight = counts[(flavor, "T")]
-        loose = counts[(flavor, "L")]
-        loose_not_tight = counts[(flavor, "LT")]
-        untagged = counts[(flavor, "N")]
+        inclusive = {wp: counts[(flavor, wp)] for wp in INCLUSIVE_WPS}
+        exclusive = {category: counts[(flavor, category)] for category in EXCLUSIVE_CATEGORIES}
         identity_scale = np.maximum.reduce([
-            np.ones_like(denominator), np.abs(denominator), np.abs(tight),
-            np.abs(loose), np.abs(loose_not_tight), np.abs(untagged),
+            np.ones_like(denominator), np.abs(denominator),
+            *(np.abs(values) for values in inclusive.values()),
+            *(np.abs(values) for values in exclusive.values()),
         ])
         identity_tolerance = 1e-10 * identity_scale
-        identity_invalid = ((np.abs(loose - (tight + loose_not_tight)) > identity_tolerance) |
-                            (np.abs(denominator - (tight + loose_not_tight + untagged)) > identity_tolerance))
-
-        # Signed generator weights can make a small MC bin statistically
-        # pathological.  Do not silently turn it into an unweighted result:
-        # reject it so the bin can be merged or supplied with more MC.
+        identity_invalid = (
+            (np.abs(inclusive["L"] - (exclusive["LnotM"] + inclusive["M"])) > identity_tolerance) |
+            (np.abs(inclusive["M"] - (exclusive["MnotT"] + inclusive["T"])) > identity_tolerance) |
+            (np.abs(inclusive["T"] - (exclusive["TnotXT"] + inclusive["XT"])) > identity_tolerance) |
+            (np.abs(inclusive["XT"] - (exclusive["XTnotXXT"] + inclusive["XXT"])) > identity_tolerance) |
+            (np.abs(denominator - sum(exclusive.values())) > identity_tolerance)
+        )
         tolerance = 1e-10 * identity_scale
         nonempty = np.abs(denominator) > tolerance
-        invalid = identity_invalid | ((nonempty & ((denominator <= 0) | (tight < -tolerance) |
-                                (loose < -tolerance) | (tight > loose + tolerance) |
-                                (loose > denominator + tolerance))) |
-                   (~nonempty & ((np.abs(tight) > tolerance) |
-                                 (np.abs(loose_not_tight) > tolerance) |
-                                 (np.abs(untagged) > tolerance))))
+        ordered_invalid = (
+            (inclusive["XXT"] < -tolerance) |
+            (inclusive["XT"] < inclusive["XXT"] - tolerance) |
+            (inclusive["T"] < inclusive["XT"] - tolerance) |
+            (inclusive["M"] < inclusive["T"] - tolerance) |
+            (inclusive["L"] < inclusive["M"] - tolerance) |
+            (inclusive["L"] > denominator + tolerance)
+        )
+        exclusive_invalid = np.logical_or.reduce(
+            [values < -tolerance for values in exclusive.values()]
+        )
+        cancellation_invalid = np.zeros_like(denominator, dtype=bool)
+        if variances is not None:
+            cancellation_scale = np.maximum(1., identity_scale) ** 2
+            for category in EXCLUSIVE_CATEGORIES:
+                cancellation_invalid |= (
+                    (np.abs(exclusive[category]) <= tolerance) &
+                    (variances[(flavor, category)] > 1.e-20 * cancellation_scale)
+                )
+        invalid = identity_invalid | (
+            (nonempty & ((denominator <= 0) | ordered_invalid | exclusive_invalid)) |
+            (~nonempty & np.logical_or.reduce([np.abs(values) > tolerance
+                                                for values in exclusive.values()])) |
+            cancellation_invalid
+        )
         masks[flavor] = invalid
     return masks
 
 
-def validate_counts(counts):
+def validate_counts(counts, variances=None):
     """Validate signed weighted yields before constructing an efficiency map."""
-    for flavor, invalid in invalid_count_bins(counts).items():
+    for flavor, invalid in invalid_count_bins(counts, variances).items():
         if np.any(invalid):
             bad_bins = np.argwhere(invalid).tolist()
             raise ValueError(
@@ -291,14 +314,14 @@ def repair_with_inclusive(counts, variances, inclusive_counts, inclusive_varianc
     repaired = {key: values.copy() for key, values in counts.items()}
     repaired_variances = {key: values.copy() for key, values in variances.items()}
     replacements = {}
-    for flavor, invalid in invalid_count_bins(counts).items():
+    for flavor, invalid in invalid_count_bins(counts, variances).items():
         if not np.any(invalid):
             continue
-        for state in ("den", *WORKING_POINTS):
+        for state in HISTOGRAM_STATES:
             repaired[flavor, state][invalid] = inclusive_counts[flavor, state][invalid]
             repaired_variances[flavor, state][invalid] = inclusive_variances[flavor, state][invalid]
         replacements[flavor] = np.argwhere(invalid).tolist()
-    validate_counts(repaired)
+    validate_counts(repaired, repaired_variances)
     return repaired, repaired_variances, replacements
 
 
@@ -312,7 +335,7 @@ def merge_invalid_bins_downward(counts, variances):
     merged = {key: values.copy() for key, values in counts.items()}
     merged_variances = {key: values.copy() for key, values in variances.items()}
     merged_bins = {}
-    invalid = invalid_count_bins(merged)
+    invalid = invalid_count_bins(merged, merged_variances)
     for flavor in FLAVORS:
         indices = [int(index[0]) for index in np.argwhere(invalid[flavor]) if int(index[0]) > 0]
         if not indices:
@@ -327,11 +350,11 @@ def merge_invalid_bins_downward(counts, variances):
         for group in groups:
             lower = group[0] - 1
             for index in group:
-                for state in ("den", *WORKING_POINTS):
+                for state in HISTOGRAM_STATES:
                     merged[flavor, state][lower, :] += merged[flavor, state][index, :]
                     merged_variances[flavor, state][lower, :] += merged_variances[flavor, state][index, :]
             for index in group:
-                for state in ("den", *WORKING_POINTS):
+                for state in HISTOGRAM_STATES:
                     merged[flavor, state][index, :] = merged[flavor, state][lower, :]
                     merged_variances[flavor, state][index, :] = merged_variances[flavor, state][lower, :]
             merged_bins[flavor].extend([ [index, lower] for index in group ])
@@ -367,7 +390,7 @@ def mcstat_efficiency_uncertainty(numerator, denominator, numerator_variance, de
 def compute_mcstat_uncertainties(counts, variances):
     output = {(flavor, wp): mcstat_efficiency_uncertainty(
         counts[(flavor, wp)], counts[(flavor, "den")], variances[(flavor, wp)], variances[(flavor, "den")])
-              for flavor in FLAVORS for wp in WORKING_POINTS}
+              for flavor in FLAVORS for wp in INCLUSIVE_WPS}
     for (flavor, wp), values in output.items():
         if not np.all(np.isfinite(values)):
             raise ValueError(f"Invalid weighted-binomial MC-statistical variance for {flavor}/{wp}")
@@ -389,7 +412,7 @@ def sample_category(sample, values, edges):
     flavor_entries = []
     for flavor in FLAVORS:
         wp_entries = []
-        for wp in WORKING_POINTS:
+        for wp in INCLUSIVE_WPS:
             wp_entries.append({
                 "key": wp,
                 "value": multibinning(values[(flavor, wp)], pt_edges, eta_edges),
@@ -412,7 +435,7 @@ def make_correction(name, sample_entry, description, output_name, output_descrip
         "inputs": [
             {"name": "sample", "type": "string", "description": "sample category key (final YAML family in production payload)"},
             {"name": "flavor", "type": "string", "description": "B/C/L"},
-            {"name": "WP", "type": "string", "description": "T/L/LT/N"},
+            {"name": "WP", "type": "string", "description": "L/M/T/XT/XXT"},
             {"name": "pt", "type": "real", "description": "selected AK4 jet pT"},
             {"name": "eta", "type": "real", "description": "selected AK4 jet eta"},
         ],
@@ -444,6 +467,8 @@ def update_output(path, correction_specs, replace_entries=False, replace_correct
         if ([item["name"] for item in correction["inputs"]] != expected_inputs or
                 correction["output"]["name"] != output_name):
             raise ValueError(f"Existing {correction_name} has an incompatible schema; write a new output file")
+        correction["description"] = description
+        correction["output"]["description"] = output_description
         entries = correction["data"]["content"]
         if replace_entries and correction_name not in replaced:
             correction["data"]["content"] = []
@@ -469,7 +494,7 @@ def grouped_specs(prefix, grouped_counts, grouped_variances, grouped_edges, memb
         inclusive_counts, inclusive_variances)
     if inclusive_merged_bins:
         print(f"inclusive: merged pathological pT bins into their lower neighbors: {inclusive_merged_bins}")
-    validate_counts(inclusive_counts)
+    validate_counts(inclusive_counts, inclusive_variances)
     specs, fallbacks = [], {}
     for group in sorted(members):
         counts, variances, merged_bins = merge_invalid_bins_downward(
@@ -482,7 +507,7 @@ def grouped_specs(prefix, grouped_counts, grouped_variances, grouped_edges, memb
             fallbacks[group] = fallback_bins
             print(f"{group}: replaced {sum(len(bins) for bins in fallback_bins.values())} pathological bins with all-MC yields")
         efficiency_values = {(flavor, wp): efficiency(counts[(flavor, wp)], counts[(flavor, "den")])
-                             for flavor in FLAVORS for wp in WORKING_POINTS}
+                             for flavor in FLAVORS for wp in INCLUSIVE_WPS}
         mcstat_uncertainties = compute_mcstat_uncertainties(counts, variances)
         specs.extend([
             (prefix, sample_category(group, efficiency_values, grouped_edges[group]),
@@ -632,9 +657,9 @@ def main():
     # Exact-sample payloads are useful for local diagnostics only.  Runtime
     # lookup intentionally accepts final family keys only.
     counts, variances, edges = read_merged_histograms(args.input, args.year, args.channel, args.sample)
-    validate_counts(counts)
+    validate_counts(counts, variances)
     efficiency_values = {(flavor, wp): efficiency(counts[(flavor, wp)], counts[(flavor, "den")])
-                         for flavor in FLAVORS for wp in WORKING_POINTS}
+                         for flavor in FLAVORS for wp in INCLUSIVE_WPS}
     mcstat_uncertainties = compute_mcstat_uncertainties(counts, variances)
     update_output(args.output, [
         (prefix, sample_category(args.sample, efficiency_values, edges),

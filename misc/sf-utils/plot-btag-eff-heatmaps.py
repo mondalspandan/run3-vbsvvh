@@ -14,7 +14,11 @@ from btag_eff_families import load_config, retained_source_channels, sample_fami
 
 
 FLAVORS = ("b", "c", "light")
-WORKING_POINTS = {"FailLoose": "N", "Loose": "L", "LooseNotTight": "LT", "Tight": "T"}
+PLOT_STATES = {
+    "FailLoose": "N", "Loose": "L", "LooseNotMedium": "LnotM", "Medium": "M",
+    "MediumNotTight": "MnotT", "Tight": "T", "TightNotExtraTight": "TnotXT",
+    "ExtraTight": "XT", "ExtraTightNotExtraExtraTight": "XTnotXXT", "ExtraExtraTight": "XXT",
+}
 COLORMAPS = {"b": "Blues", "c": "Oranges", "light": "Greens"}
 LUMI_FB = {
     "2016preVFP": 19.5, "2016postVFP": 16.8, "2017": 41.5, "2018": 59.8,
@@ -57,8 +61,10 @@ def read_sample_histograms(paths, year, channel, sample):
             expected = {"year": year, "channel": channel, "sample": sample}
             if actual != expected:
                 raise ValueError(f"Metadata mismatch in {path}: expected {expected}, found {actual}")
+            if "btag_eff_schema_version" not in root_file or root_file["btag_eff_schema_version"].member("fTitle") != "2":
+                raise ValueError(f"{path} is not a schema-v2 five-working-point b-tag efficiency file")
             for flavor in FLAVORS:
-                for kind in ("den", "T", "L", "LT", "N"):
+                for kind in ("den", *PLOT_STATES.values()):
                     histogram = root_file[f"btag_{flavor}_{kind}"]
                     values, pt_edges, eta_edges = histogram.to_numpy(flow=True)
                     histogram_variances = histogram.variances(flow=True)
@@ -111,11 +117,11 @@ def plot_sample(totals, variances, edges, year, destination):
     eta_edges = np.asarray([-max_abs_eta(year), max_abs_eta(year)])
     denoms = {flavor: merged_eta_bins(totals[flavor, "den"]) for flavor in FLAVORS}
     denom_variances = {flavor: merged_eta_bins(variances[flavor, "den"]) for flavor in FLAVORS}
-    fig, axes = plt.subplots(4, 3, figsize=(16.5, 16.0), sharex=True, sharey=True,
+    fig, axes = plt.subplots(len(PLOT_STATES), 3, figsize=(16.5, 3.4 * len(PLOT_STATES)), sharex=True, sharey=True,
                              squeeze=False)
     pt_centers = np.sqrt(pt_edges[:-1] * pt_edges[1:])
     eta_centers = 0.5 * (eta_edges[:-1] + eta_edges[1:])
-    for row, (wp_label, kind) in enumerate(WORKING_POINTS.items()):
+    for row, (wp_label, kind) in enumerate(PLOT_STATES.items()):
         for column, flavor in enumerate(FLAVORS):
             axis = axes[row, column]
             numerator = merged_eta_bins(totals[flavor, kind])
@@ -138,7 +144,7 @@ def plot_sample(totals, variances, edges, year, destination):
                           f"{truncated_efficiency_label(uncertainty[pt_index, eta_index])}",
                           color="black", fontsize=7, ha="center", va="center", rotation=90)
             axis.set_xscale("log")
-            if row == len(WORKING_POINTS) - 1:
+            if row == len(PLOT_STATES) - 1:
                 axis.set_xlabel(r"Jet $p_{T}$ [GeV]")
             if column == 0:
                 axis.set_ylabel(r"Jet $\eta$")

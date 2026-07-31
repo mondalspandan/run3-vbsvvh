@@ -29,12 +29,19 @@ run_rdf = load("btag_run_rdf_test", "../../preselection/run_rdf.py")
 
 def counts(den=10., tight=2., loose=5., lt=3., untagged=5.):
     values = {}
+    medium = loose - lt
+    extra_tight = 0.5 * tight
+    extra_extra_tight = 0.5 * extra_tight
+    states = {
+        "den": den, "L": loose, "M": medium, "T": tight,
+        "XT": extra_tight, "XXT": extra_extra_tight,
+        "LnotM": loose - medium, "MnotT": medium - tight,
+        "TnotXT": tight - extra_tight, "XTnotXXT": extra_tight - extra_extra_tight,
+        "N": untagged,
+    }
     for flavor in conv.FLAVORS:
-        values[flavor, "den"] = np.array([[den]])
-        values[flavor, "T"] = np.array([[tight]])
-        values[flavor, "L"] = np.array([[loose]])
-        values[flavor, "LT"] = np.array([[lt]])
-        values[flavor, "N"] = np.array([[untagged]])
+        for state, value in states.items():
+            values[flavor, state] = np.array([[value]])
     return values
 
 
@@ -83,9 +90,11 @@ class BTagEfficiencyTests(unittest.TestCase):
     def test_exclusive_category_identity_and_mask(self):
         valid = counts()
         for flavor in conv.FLAVORS:
-            self.assertTrue(np.allclose(valid[flavor, "T"] + valid[flavor, "LT"] + valid[flavor, "N"],
-                                        valid[flavor, "den"]))
-            self.assertTrue(np.allclose(valid[flavor, "T"] + valid[flavor, "LT"], valid[flavor, "L"]))
+            self.assertTrue(np.allclose(valid[flavor, "L"], valid[flavor, "LnotM"] + valid[flavor, "M"]))
+            self.assertTrue(np.allclose(valid[flavor, "M"], valid[flavor, "MnotT"] + valid[flavor, "T"]))
+            self.assertTrue(np.allclose(valid[flavor, "T"], valid[flavor, "TnotXT"] + valid[flavor, "XT"]))
+            self.assertTrue(np.allclose(valid[flavor, "XT"], valid[flavor, "XTnotXXT"] + valid[flavor, "XXT"]))
+            self.assertTrue(np.allclose(valid[flavor, "den"], sum(valid[flavor, state] for state in conv.EXCLUSIVE_CATEGORIES)))
         bad = counts(loose=4.)
         self.assertTrue(conv.invalid_count_bins(bad)["b"][0, 0])
         result = plots.efficiencies(conv, bad, {key: value.copy() for key, value in bad.items()})
@@ -193,10 +202,11 @@ class BTagEfficiencyTests(unittest.TestCase):
             self.assertEqual(output.read_text(), "original payload\n")
 
     def test_sparse_summary_is_unavailable(self):
-        values = {(flavor, wp): np.array([[.2]]) for flavor in conv.FLAVORS for wp in conv.WORKING_POINTS}
-        errors = {(flavor, wp): np.array([[.1]]) for flavor in conv.FLAVORS for wp in conv.WORKING_POINTS}
+        states = (*conv.INCLUSIVE_WPS, *conv.EXCLUSIVE_CATEGORIES)
+        values = {(flavor, wp): np.array([[.2]]) for flavor in conv.FLAVORS for wp in states}
+        errors = {(flavor, wp): np.array([[.1]]) for flavor in conv.FLAVORS for wp in states}
         valid = {(flavor, wp): np.array([[flavor == "b" and wp == "T"]])
-                 for flavor in conv.FLAVORS for wp in conv.WORKING_POINTS}
+                 for flavor in conv.FLAVORS for wp in states}
         pathological = {flavor: np.array([[False]]) for flavor in conv.FLAVORS}
         result = values, errors, valid, pathological
         with tempfile.TemporaryDirectory() as tmp:
@@ -245,7 +255,8 @@ class BTagEfficiencyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             args = type("Args", (), {"plot_dir": Path(tmp)})()
             plots.matrix_plots({"a": None}, {"a": result}, args, 1., 13.)
-            self.assertTrue((Path(tmp) / "compatibility_b_T.pdf").exists())
+            self.assertTrue((Path(tmp) / "compatibility_b_N.pdf").exists())
+            self.assertTrue((Path(tmp) / "compatibility_b_XXT.pdf").exists())
 
 
 if __name__ == "__main__":

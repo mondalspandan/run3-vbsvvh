@@ -15,7 +15,7 @@ import numpy as np
 from btag_eff_families import load_config, sample_family
 
 
-EXCLUSIVE_CATEGORIES = ("T", "LT", "N")
+EXCLUSIVE_CATEGORIES = ("N", "LnotM", "MnotT", "TnotXT", "XTnotXXT", "XXT")
 
 
 LUMI_FB = {
@@ -76,16 +76,16 @@ def collect_samples(conv, input_dir, year, channel, job_manifest=None, config=No
 
 def efficiencies(conv, counts, variances):
     values, uncertainties, valid = {}, {}, {}
-    pathological = conv.invalid_count_bins(counts)
+    pathological = conv.invalid_count_bins(counts, variances)
     for flavor in conv.FLAVORS:
         den = counts[(flavor, "den")]
-        for wp in conv.WORKING_POINTS:
-            num = counts[(flavor, wp)]
+        for state in (*conv.INCLUSIVE_WPS, *conv.EXCLUSIVE_CATEGORIES):
+            num = counts[(flavor, state)]
             ok = ~pathological[flavor] & (den > 0) & (num >= 0) & (num <= den)
-            values[flavor, wp] = np.divide(num, den, out=np.full_like(den, np.nan), where=ok)
-            uncertainties[flavor, wp] = conv.mcstat_efficiency_uncertainty(
-                num, den, variances[(flavor, wp)], variances[(flavor, "den")])
-            valid[flavor, wp] = ok & np.isfinite(uncertainties[flavor, wp])
+            values[flavor, state] = np.divide(num, den, out=np.full_like(den, np.nan), where=ok)
+            uncertainties[flavor, state] = conv.mcstat_efficiency_uncertainty(
+                num, den, variances[(flavor, state)], variances[(flavor, "den")])
+            valid[flavor, state] = ok & np.isfinite(uncertainties[flavor, state])
     return values, uncertainties, valid, pathological
 
 
@@ -149,7 +149,7 @@ def money_plot(groups, results, args, lumi, energy, group_label="family"):
                 continue
             values = []
             for flavor in ("b", "c", "light"):
-                for wp in ("T", "LT", "N"):
+                for wp in EXCLUSIVE_CATEGORIES:
                     pull = pulls(results[left], results[right], flavor, wp)
                     values.append(np.abs(pull[np.isfinite(pull)]))
             pooled = np.concatenate(values) if values else np.array([])
@@ -167,7 +167,7 @@ def money_plot(groups, results, args, lumi, energy, group_label="family"):
             value = matrix[row, col]
             if np.isfinite(value) and value < 0.2:
                 ax.text(col, row, f"{value:.2f}", color="white", ha="center", va="center", fontsize=6)
-    fig.colorbar(image, ax=ax, label=r"Diagnostic fraction of valid bins with $|$pull$|>2$ (T, LT, N)")
+    fig.colorbar(image, ax=ax, label=r"Diagnostic fraction of valid bins with $|$pull$|>2$ (N, LnotM, MnotT, TnotXT, XTnotXXT, XXT)")
     cms_label(ax, lumi, energy)
     fig.tight_layout()
     stem = args.plot_dir / "compatibility_all_flavours_all_wps"
@@ -186,18 +186,19 @@ def family_pull_pdfs(groups, results, args, lumi, energy, group_label="family"):
         others = [name for name in names if name != source]
         with PdfPages(args.plot_dir / f"pulls_{source}.pdf") as pdf:
             for flavor in ("b", "c", "light"):
-                fig, axes = plt.subplots(1, 3, figsize=(18, max(7, 0.42 * len(others) + 3)), sharey=True)
-                for ax, wp in zip(axes, ("T", "LT", "N")):
+                fig, axes_grid = plt.subplots(2, 3, figsize=(18, max(9, 0.42 * len(others) + 4)), sharey=True)
+                axes = list(axes_grid.flat)
+                for ax, wp in zip(axes, EXCLUSIVE_CATEGORIES):
                     rows = [np.clip(pulls(results[source], results[other], flavor, wp).reshape(-1), -5, 5)
                             for other in others]
                     image = ax.imshow(rows, aspect="auto", cmap="coolwarm", vmin=-5, vmax=5,
                                       interpolation="nearest")
                     ax.set_xlabel(rf"{wp}: flattened $(p_T, |\eta|)$ bin")
                     ax.set_xticks(np.arange(0, rows[0].size, 8))
-                axes[0].set_yticks(range(len(others)), others, fontsize=8)
-                axes[0].set_ylabel(f"Comparison {group_label}\n({source} minus other)")
+                axes_grid[0, 0].set_yticks(range(len(others)), others, fontsize=8)
+                axes_grid[0, 0].set_ylabel(f"Comparison {group_label}\n({source} minus other)")
                 fig.colorbar(image, ax=axes, label="Pull (clipped at $\pm5$)")
-                cms_label(axes[0], lumi, energy)
+                cms_label(axes_grid[0, 0], lumi, energy)
                 fig.subplots_adjust(left=0.28, right=0.90, bottom=0.16, top=0.94, wspace=0.10)
                 pdf.savefig(fig, bbox_inches="tight")
                 plt.close(fig)
@@ -205,7 +206,7 @@ def family_pull_pdfs(groups, results, args, lumi, energy, group_label="family"):
 
 def summary_json(groups, results, args):
     summary = {"_metadata": {
-        "categories": ["T", "LT", "N"],
+        "categories": list(EXCLUSIVE_CATEGORIES),
         "minimum_valid_bins": 3,
         "note": "Compatibility is a diagnostic, not a formal hypothesis test.",
         "input_completeness_verified": getattr(args, "input_completeness_verified", False),
@@ -222,7 +223,7 @@ def summary_json(groups, results, args):
             pooled = []
             candidates = excluded_total = 0
             for flavor in ("b", "c", "light"):
-                for wp in ("T", "LT", "N"):
+                for wp in EXCLUSIVE_CATEGORIES:
                     pull = pulls(results[left], results[right], flavor, wp)
                     finite = np.abs(pull[np.isfinite(pull)])
                     excluded = results[left][3][flavor] | results[right][3][flavor]

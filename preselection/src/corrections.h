@@ -36,6 +36,8 @@ B-TAGGING WORKING POINTS
 RVec<bool> isbTagLoose(std::string year, RVec<float> btag_score);
 RVec<bool> isbTagMedium(std::string year, RVec<float> btag_score);
 RVec<bool> isbTagTight(std::string year, RVec<float> btag_score);
+RVec<bool> isbTagExtraTight(std::string year, RVec<float> btag_score);
+RVec<bool> isbTagExtraExtraTight(std::string year, RVec<float> btag_score);
 
 /*
 ############################################
