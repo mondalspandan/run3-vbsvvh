@@ -8,6 +8,7 @@
 #include <string_view>
 #include <cmath>
 #include <algorithm>
+#include <vector>
 
 // Canonical UParTAK4 working-point order, from loosest to tightest.  Keep this
 // definition shared by efficiency production and runtime SF application.
@@ -38,6 +39,7 @@ inline std::string bTagSafeYearToken(std::string year) {
     return year;
 }
 
+std::vector<std::string> bTagWorkingPointsForChannel(const std::string &channel);
 bool bTagScaleFactorsEnabled(const std::string &channel);
 
 #endif

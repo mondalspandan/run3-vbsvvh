@@ -20,7 +20,10 @@ ANA_CHANNELS = {
         "3lep"         : "3lep",
         "4lep"         : "4lep",
 }
-B_TAG_EFF_EXCLUDED_CHANNELS = {"0lep_1FJ_met", "0lep_2FJ_met", "all_events"}
+# MET-trigger subsets may have their own efficiency payloads.  They remain
+# excluded from final channel merging by the b-tag YAML, but are valid raw
+# production channels here.
+B_TAG_EFF_EXCLUDED_CHANNELS = {"all_events"}
 SUPPORTED_BTAG_EFF_YEARS = {"2016preVFP", "2016postVFP", "2017", "2018", "2024Prompt"}
 
 # Merge the input jsons into one dictionary

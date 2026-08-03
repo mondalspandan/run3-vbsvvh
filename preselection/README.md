@@ -76,12 +76,12 @@ command is shown, commented out, in `run_wrapper.sh`:
 #   -c all -m "$MODE" -r 3 -f 1 --btag-eff --year 2024Prompt
 ```
 
-The shared configuration is
-the era-specific canonical map (`btag_eff_families_run2.yaml` for 2016–2018,
-or `btag_eff_families_run3.yaml` for 2024Prompt). Its ordered
-`preliminary_families` rules define the semantic first-pass grouping used by
-conversion and compatibility plots. Its `final_merges` block defines the only
-runtime sample/channel keys: update it only after inspecting the plots.
+The shared configuration is the canonical map
+`corrections/scalefactors/btagging/btag_eff_families.yaml`. It contains the
+common ordered `preliminary_families` rules that define the semantic first-pass
+grouping used by conversion and compatibility plots. Its single `final_merges`
+block defines the sample/channel keys used for every supported era; edit it only
+after inspecting the compatibility plots.
 
 Preliminary conversion writes `btag_eff_<year>_*_prelim.json`; it is diagnostic-only.
 Normal MC processing loads the year-scoped final `btag_eff_<year>.json`, whose correction names
@@ -94,9 +94,10 @@ only; they are not consumed by the main analysis. (B-tagging SF variation
 branches are separate and remain part of the analysis weighting.)
 
 Normal MC b-tag SF application is controlled per analysis channel by
-`applybtag.yaml`. A channel set to `True` receives the nominal b-tag factor and
-its variation branches; a channel set to `False` receives neither. The
-`--skip-btag-sf` option overrides a `True` entry for one invocation. Disabled
+`applybtag.yaml`. Each channel contains an ordered subset of `L, M, T, XT, XXT`,
+for example `1lep_1FJ: [L, T]`; the selected subset determines the nested
+event-reweighting categories. Use `[]` to disable SF application for a channel.
+The `--skip-btag-sf` option overrides an enabled list for one invocation. Disabled
 channels retain the ordinary uncoupled pileup, PS, muF, and muR variations.
 
 HF calibration SFs are written as `{central,up,down}` vectors.  The canonical

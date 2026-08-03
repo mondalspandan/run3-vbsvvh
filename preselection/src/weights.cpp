@@ -97,26 +97,30 @@ using BTagWPValues = std::array<double, kBTagInclusiveWorkingPoints.size()>;
 
 double unityForInvalidBTagWeight(std::atomic<unsigned long long> &counter);
 
-std::string bTagObservedCategory(const std::array<bool, kBTagInclusiveWorkingPoints.size()> &passed) {
-    if (passed[4]) return "XXT";
-    if (passed[3]) return "XTnotXXT";
-    if (passed[2]) return "TnotXT";
-    if (passed[1]) return "MnotT";
-    if (passed[0]) return "LnotM";
-    return "N";
+std::string bTagObservedCategory(const std::vector<bool> &passed,
+                                 const std::vector<std::size_t> &indices) {
+    int passed_index = -1;
+    for (int index = static_cast<int>(passed.size()) - 1; index >= 0; --index)
+        if (passed[static_cast<std::size_t>(index)]) { passed_index = index; break; }
+    if (passed_index < 0) return "N";
+    if (passed_index == static_cast<int>(passed.size()) - 1)
+        return std::string(kBTagInclusiveWorkingPoints[indices.back()]);
+    return std::string(kBTagInclusiveWorkingPoints[indices[static_cast<std::size_t>(passed_index)]]) + "not" +
+           std::string(kBTagInclusiveWorkingPoints[indices[static_cast<std::size_t>(passed_index + 1)]]);
 }
 
-int bTagTightestPassed(const std::array<bool, kBTagInclusiveWorkingPoints.size()> &passed) {
+int bTagTightestPassed(const std::vector<bool> &passed) {
     for (int index = static_cast<int>(passed.size()) - 1; index >= 0; --index)
         if (passed[static_cast<std::size_t>(index)]) return index;
     return -1;
 }
 
-double bTagCategoryWeight(const BTagWPValues &sf, const BTagWPValues &eff,
-                          const std::array<bool, kBTagInclusiveWorkingPoints.size()> &passed,
+double bTagCategoryWeight(const std::vector<double> &sf, const std::vector<double> &eff,
+                          const std::vector<bool> &passed,
+                          const std::vector<std::size_t> &indices,
                           std::string_view source, const char *direction,
                           const char *flavor) {
-    const std::string category = bTagObservedCategory(passed);
+    const std::string category = bTagObservedCategory(passed, indices);
     const auto fail = [&](const char *reason, std::atomic<unsigned long long> &counter) {
         recordBTagFailure(reason, source, direction, flavor, category.c_str());
         return unityForInvalidBTagWeight(counter);
@@ -164,8 +168,7 @@ std::size_t bTagHFSourceIndex(std::string_view source) {
     return std::distance(kBTagHFSources.begin(), it);
 }
 
-constexpr const char *kBTagRun2FamilyConfig = "corrections/scalefactors/btagging/btag_eff_families_run2.yaml";
-constexpr const char *kBTagRun3FamilyConfig = "corrections/scalefactors/btagging/btag_eff_families_run3.yaml";
+constexpr const char *kBTagFamilyConfig = "corrections/scalefactors/btagging/btag_eff_families.yaml";
 
 struct BTagFamilyConfig {
     std::vector<std::pair<std::string, std::vector<std::string>>> preliminary;
@@ -271,14 +274,9 @@ BTagFamilyConfig loadBTagFamilyConfig(const std::string &path) {
 }
 
 const BTagFamilyConfig &bTagFamilyConfig(const std::string &year) {
-    if (year == "2016preVFP" || year == "2016postVFP" || year == "2017" || year == "2018") {
-        static const BTagFamilyConfig run2 = loadBTagFamilyConfig(kBTagRun2FamilyConfig);
-        return run2;
-    }
-    if (year == "2024Prompt") {
-        static const BTagFamilyConfig run3 = loadBTagFamilyConfig(kBTagRun3FamilyConfig);
-        return run3;
-    }
+    static const BTagFamilyConfig config = loadBTagFamilyConfig(kBTagFamilyConfig);
+    if (year == "2016preVFP" || year == "2016postVFP" || year == "2017" ||
+        year == "2018" || year == "2024Prompt") return config;
     throw std::runtime_error("No b-tag efficiency YAML is configured for unsupported year " + year);
 }
 
@@ -723,8 +721,15 @@ BTAG SFs
 RNode applyBTaggingScaleFactors(std::unordered_map<std::string, correction::CorrectionSet> cset_btag,
                                  std::unordered_map<std::string, std::string> corrname_map_HF,
                                  std::unordered_map<std::string, std::string> corrname_map_LF,
-                                 const std::string &channel, const std::string &nuisance_year, RNode df) {
-    auto evaluate_bundle = [cset_btag, corrname_map_HF, corrname_map_LF, channel, nuisance_year]
+                                 const std::string &channel, const std::string &nuisance_year,
+                                 const std::vector<std::string> &working_points, RNode df) {
+    std::vector<std::size_t> selected_indices;
+    for (const auto &wp : working_points) {
+        const auto it = std::find(kBTagInclusiveWorkingPoints.begin(), kBTagInclusiveWorkingPoints.end(), wp);
+        if (it == kBTagInclusiveWorkingPoints.end()) throw std::runtime_error("Unknown b-tag working point " + wp);
+        selected_indices.push_back(static_cast<std::size_t>(std::distance(kBTagInclusiveWorkingPoints.begin(), it)));
+    }
+    auto evaluate_bundle = [cset_btag, corrname_map_HF, corrname_map_LF, channel, nuisance_year, selected_indices]
         (const std::string &year, const std::string &sample, const RVec<float> &eta,
          const RVec<float> &pt, const RVec<unsigned char> &jetflavor,
          const RVec<bool> &is_loose, const RVec<bool> &is_medium,
@@ -752,7 +757,8 @@ RNode applyBTaggingScaleFactors(std::unordered_map<std::string, correction::Corr
         catch (...) { throw std::runtime_error("B-tag efficiency correction is unavailable for year=" + year +
                                                 ", requested_correction=" + efficiency_name); }
         for (const auto flavor : {std::string("B"), std::string("C"), std::string("L")}) {
-            for (const auto wp : kBTagInclusiveWorkingPoints) {
+            for (const auto index : selected_indices) {
+                const auto wp = kBTagInclusiveWorkingPoints[index];
                 try { (void)efficiency->evaluate({efficiency_sample, flavor, std::string(wp), 30., 0.}); }
                 catch (...) {
                     throw std::runtime_error("B-tag efficiency payload is missing flavor=" + flavor +
@@ -774,7 +780,7 @@ RNode applyBTaggingScaleFactors(std::unordered_map<std::string, correction::Corr
             if (std::abs(eta[jet]) >= bTagMaxAbsEta(year)) continue;
             const bool heavy = flavor == 5 || flavor == 4;
             const char *label = flavor == 5 ? "B" : (flavor == 4 ? "C" : "L");
-            const std::array<bool, kBTagInclusiveWorkingPoints.size()> passed = {
+            const std::array<bool, kBTagInclusiveWorkingPoints.size()> all_passed = {
                 is_loose[jet], is_medium[jet], is_tight[jet],
                 is_extra_tight[jet], is_extra_extra_tight[jet]
             };
@@ -795,7 +801,17 @@ RNode applyBTaggingScaleFactors(std::unordered_map<std::string, correction::Corr
                 return values;
             };
             const BTagWPValues central_sf = evaluate_sf("central", sf_flavor);
-            const double central_weight = bTagCategoryWeight(central_sf, efficiencies, passed,
+            std::vector<bool> passed;
+            std::vector<double> selected_efficiencies, selected_central_sf;
+            for (const auto index : selected_indices) {
+                passed.push_back(all_passed[index]);
+                selected_efficiencies.push_back(efficiencies[index]);
+                selected_central_sf.push_back(central_sf[index]);
+            }
+            // The selected cumulative efficiencies retain the full exclusive
+            // content: for non-adjacent WPs, e.g. [L,T], eps_L-eps_T is the
+            // sum of the omitted LnotM and MnotT intervals.
+            const double central_weight = bTagCategoryWeight(selected_central_sf, selected_efficiencies, passed, selected_indices,
                                                               "central", "central", label);
             if (!heavy) {
                 for (const auto source : {std::string("uncorrelated"), std::string("correlated")}) {
@@ -803,7 +819,9 @@ RNode applyBTaggingScaleFactors(std::unordered_map<std::string, correction::Corr
                     weights[0] *= central_weight;
                     for (const auto direction : {std::string("up_"), std::string("down_")}) {
                         const auto shifted_sf = evaluate_sf(direction + source, sf_flavor);
-                        const double shifted_weight = bTagCategoryWeight(shifted_sf, efficiencies, passed,
+                        std::vector<double> selected_shifted_sf;
+                        for (const auto index : selected_indices) selected_shifted_sf.push_back(shifted_sf[index]);
+                        const double shifted_weight = bTagCategoryWeight(selected_shifted_sf, selected_efficiencies, passed, selected_indices,
                                                                           source, direction == "up_" ? "up" : "down", label);
                         weights[direction == "up_" ? 1 : 2] *= shifted_weight;
                     }
@@ -830,8 +848,10 @@ RNode applyBTaggingScaleFactors(std::unordered_map<std::string, correction::Corr
                                                      ": " + error.what());
                         }
                     }
+                    std::vector<double> selected_shifted_sf;
+                    for (const auto wp : selected_indices) selected_shifted_sf.push_back(shifted_sf[wp]);
                     const double shifted_weight = bTagCategoryWeight(
-                        shifted_sf, efficiencies, passed, source,
+                        selected_shifted_sf, selected_efficiencies, passed, selected_indices, source,
                         direction == "up_" ? "up" : "down", label);
                     weights[direction == "up_" ? 1 : 2] *= shifted_weight;
                 }
@@ -952,7 +972,8 @@ RNode applyDataWeights(RNode df_) {
     return applyGoldenJSONWeight(LumiMask, df_);
 }
 
-RNode applyMCWeights(RNode df_, const std::string &channel, const std::string &nuisance_year, bool apply_btag_sf) {
+RNode applyMCWeights(RNode df_, const std::string &channel, const std::string &nuisance_year,
+                     bool apply_btag_sf, const std::vector<std::string> &btag_working_points) {
     // Check for LHE branches (not present in all samples, e.g. QCD)
     auto colNames = df_.GetColumnNames();
     auto hasColumn = [&colNames](const std::string& name) {
@@ -976,7 +997,9 @@ RNode applyMCWeights(RNode df_, const std::string &channel, const std::string &n
                 btag_corrections.emplace("eff_" + std::string(year), loadBTagEfficiencyCorrectionSet(year));
         }
         resetBTagDiagnostics();
-        df = applyBTaggingScaleFactors(std::move(btag_corrections), bTaggingScaleFactors_HF_corrname, bTaggingScaleFactors_LF_corrname, channel, nuisance_year, df);
+        df = applyBTaggingScaleFactors(std::move(btag_corrections), bTaggingScaleFactors_HF_corrname,
+                                       bTaggingScaleFactors_LF_corrname, channel, nuisance_year,
+                                       btag_working_points, df);
     }
 
     if (hasLHEPart) {

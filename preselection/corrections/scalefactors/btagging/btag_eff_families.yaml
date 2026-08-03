@@ -1,4 +1,3 @@
-# First-pass semantic grouping.  Rule order is significant.
 preliminary_families:
   VBS_VVH:
     - VBSWWH_
@@ -94,10 +93,6 @@ preliminary_families:
     - QCD_HT
   QCD_PT:
     - QCD_Bin
-
-# Deliberate second-pass merging.  After inspecting preliminary compatibility
-# plots, replace identity entries below with validated merged groups.  Every
-# preliminary family/channel must occur in exactly one final group.
 final_merges:
   samples:
     VBS_VVH:
@@ -156,9 +151,6 @@ final_merges:
       - 2lep_2FJ
       - 3lep
       - 4lep
-
-# These are stored outputs from subset/inclusive bookkeeping selections, not
-# independent inputs to the final efficiency payload or diagnostics.
 excluded_source_channels:
   - all_events
   - 0lep_1FJ_met

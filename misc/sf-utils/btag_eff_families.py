@@ -7,17 +7,12 @@ import yaml
 
 CONFIG_DIR = (Path(__file__).resolve().parents[2] / "preselection" / "corrections" /
               "scalefactors" / "btagging")
-RUN2_CONFIG = CONFIG_DIR / "btag_eff_families_run2.yaml"
-RUN3_CONFIG = CONFIG_DIR / "btag_eff_families_run3.yaml"
+CONFIG_PATH = CONFIG_DIR / "btag_eff_families.yaml"
 
 
 def config_path_for_year(year):
-    """Select the canonical family map for the framework's era spelling."""
-    if str(year) in {"2016preVFP", "2016postVFP", "2017", "2018"}:
-        return RUN2_CONFIG
-    if str(year) == "2024Prompt":
-        return RUN3_CONFIG
-    raise ValueError(f"Unsupported year for b-tag family configuration: {year}")
+    """Return the one canonical family/merge configuration for every era."""
+    return CONFIG_PATH
 
 
 def _nonempty_string_list(value, context):
@@ -117,7 +112,10 @@ def load_config(year, path=None):
     path = config_path_for_year(year) if path is None else path
     text = Path(path).read_text()
     _validate_canonical_layout(text)
-    return validate_config(yaml.safe_load(text))
+    raw = yaml.safe_load(text)
+    if not isinstance(raw, dict) or set(raw) != {"preliminary_families", "final_merges", "excluded_source_channels"}:
+        raise ValueError("canonical b-tag family YAML has an invalid top-level schema")
+    return validate_config(raw)
 
 
 def sample_family(sample, config=None, year=None):
