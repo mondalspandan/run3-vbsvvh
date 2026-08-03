@@ -93,8 +93,6 @@ struct BTagWeightBundle {
     RVec<double> lf_correlated = {1., 1., 1.};
 };
 
-using BTagWPValues = std::array<double, kBTagInclusiveWorkingPoints.size()>;
-
 double unityForInvalidBTagWeight(std::atomic<unsigned long long> &counter);
 
 std::string bTagObservedCategory(const std::vector<bool> &passed,
@@ -102,7 +100,8 @@ std::string bTagObservedCategory(const std::vector<bool> &passed,
     int passed_index = -1;
     for (int index = static_cast<int>(passed.size()) - 1; index >= 0; --index)
         if (passed[static_cast<std::size_t>(index)]) { passed_index = index; break; }
-    if (passed_index < 0) return "N";
+    if (passed_index < 0)
+        return "fail" + std::string(kBTagInclusiveWorkingPoints[indices.front()]);
     if (passed_index == static_cast<int>(passed.size()) - 1)
         return std::string(kBTagInclusiveWorkingPoints[indices.back()]);
     return std::string(kBTagInclusiveWorkingPoints[indices[static_cast<std::size_t>(passed_index)]]) + "not" +
@@ -120,6 +119,8 @@ double bTagCategoryWeight(const std::vector<double> &sf, const std::vector<doubl
                           const std::vector<std::size_t> &indices,
                           std::string_view source, const char *direction,
                           const char *flavor) {
+    if (sf.empty() || sf.size() != eff.size() || sf.size() != passed.size() || sf.size() != indices.size())
+        throw std::runtime_error("Inconsistent b-tag working-point vector sizes");
     const std::string category = bTagObservedCategory(passed, indices);
     const auto fail = [&](const char *reason, std::atomic<unsigned long long> &counter) {
         recordBTagFailure(reason, source, direction, flavor, category.c_str());
@@ -137,7 +138,7 @@ double bTagCategoryWeight(const std::vector<double> &sf, const std::vector<doubl
         if (eff[index - 1] < eff[index])
             return fail("invalid_probability", g_btag_invalid_probability);
 
-    BTagWPValues q{};
+    std::vector<double> q(sf.size());
     for (std::size_t index = 0; index < q.size(); ++index) {
         q[index] = sf[index] * eff[index];
         if (!std::isfinite(q[index]) || q[index] < 0. || q[index] > 1.)
@@ -784,30 +785,30 @@ RNode applyBTaggingScaleFactors(std::unordered_map<std::string, correction::Corr
                 is_loose[jet], is_medium[jet], is_tight[jet],
                 is_extra_tight[jet], is_extra_extra_tight[jet]
             };
-            BTagWPValues efficiencies{};
-            for (std::size_t index = 0; index < efficiencies.size(); ++index)
-                efficiencies[index] = efficiency->evaluate({efficiency_sample, label,
-                                                              std::string(kBTagInclusiveWorkingPoints[index]),
-                                                              pt[jet], eta[jet]});
             const int sf_flavor = heavy ? flavor : 0;
             const auto &sf = heavy ? hf_sf : lf_sf;
             const double sf_eta = bTagSFAbsEta(year, eta[jet]);
             const auto evaluate_sf = [&](const std::string &systematic, int sf_flavor_value) {
-                BTagWPValues values{};
-                for (std::size_t index = 0; index < values.size(); ++index)
-                    values[index] = sf->evaluate({systematic,
-                                                  std::string(kBTagInclusiveWorkingPoints[index]),
-                                                  sf_flavor_value, sf_eta, pt[jet]});
+                std::vector<double> values;
+                values.reserve(selected_indices.size());
+                for (const auto index : selected_indices)
+                    values.push_back(sf->evaluate({systematic,
+                                                   std::string(kBTagInclusiveWorkingPoints[index]),
+                                                   sf_flavor_value, sf_eta, pt[jet]}));
                 return values;
             };
-            const BTagWPValues central_sf = evaluate_sf("central", sf_flavor);
             std::vector<bool> passed;
             std::vector<double> selected_efficiencies, selected_central_sf;
+            passed.reserve(selected_indices.size());
+            selected_efficiencies.reserve(selected_indices.size());
+            selected_central_sf.reserve(selected_indices.size());
             for (const auto index : selected_indices) {
                 passed.push_back(all_passed[index]);
-                selected_efficiencies.push_back(efficiencies[index]);
-                selected_central_sf.push_back(central_sf[index]);
+                selected_efficiencies.push_back(efficiency->evaluate({efficiency_sample, label,
+                                                                       std::string(kBTagInclusiveWorkingPoints[index]),
+                                                                       pt[jet], eta[jet]}));
             }
+            selected_central_sf = evaluate_sf("central", sf_flavor);
             // The selected cumulative efficiencies retain the full exclusive
             // content: for non-adjacent WPs, e.g. [L,T], eps_L-eps_T is the
             // sum of the omitted LnotM and MnotT intervals.
@@ -818,9 +819,7 @@ RNode applyBTaggingScaleFactors(std::unordered_map<std::string, correction::Corr
                     auto &weights = source == "uncorrelated" ? bundle.lf_uncorrelated : bundle.lf_correlated;
                     weights[0] *= central_weight;
                     for (const auto direction : {std::string("up_"), std::string("down_")}) {
-                        const auto shifted_sf = evaluate_sf(direction + source, sf_flavor);
-                        std::vector<double> selected_shifted_sf;
-                        for (const auto index : selected_indices) selected_shifted_sf.push_back(shifted_sf[index]);
+                        const auto selected_shifted_sf = evaluate_sf(direction + source, sf_flavor);
                         const double shifted_weight = bTagCategoryWeight(selected_shifted_sf, selected_efficiencies, passed, selected_indices,
                                                                           source, direction == "up_" ? "up" : "down", label);
                         weights[direction == "up_" ? 1 : 2] *= shifted_weight;
@@ -834,13 +833,16 @@ RNode applyBTaggingScaleFactors(std::unordered_map<std::string, correction::Corr
                 weights[0] *= central_weight;
                 if (!bTagHFSourceAvailable(year, source)) { weights[1] *= central_weight; weights[2] *= central_weight; continue; }
                 for (const auto direction : {std::string("up_"), std::string("down_")}) {
-                    BTagWPValues shifted_sf{};
-                    for (std::size_t wp = 0; wp < shifted_sf.size(); ++wp) {
+                    std::vector<double> selected_shifted_sf;
+                    selected_shifted_sf.reserve(selected_indices.size());
+                    for (std::size_t selected = 0; selected < selected_indices.size(); ++selected) {
+                        const auto wp = selected_indices[selected];
                         try {
                             const double payload = hf_sf->evaluate({direction + source,
                                                                      std::string(kBTagInclusiveWorkingPoints[wp]),
                                                                      flavor, sf_eta, pt[jet]});
-                            shifted_sf[wp] = flavor == 4 ? central_sf[wp] + 2. * (payload - central_sf[wp]) : payload;
+                            const double central = selected_central_sf[selected];
+                            selected_shifted_sf.push_back(flavor == 4 ? central + 2. * (payload - central) : payload);
                         } catch (const std::exception &error) {
                             throw std::runtime_error("B-tag SF evaluation failed for year=" + year + ", source=" + source +
                                                      ", direction=" + direction + ", flavor=" + std::to_string(flavor) +
@@ -848,8 +850,6 @@ RNode applyBTaggingScaleFactors(std::unordered_map<std::string, correction::Corr
                                                      ": " + error.what());
                         }
                     }
-                    std::vector<double> selected_shifted_sf;
-                    for (const auto wp : selected_indices) selected_shifted_sf.push_back(shifted_sf[wp]);
                     const double shifted_weight = bTagCategoryWeight(
                         selected_shifted_sf, selected_efficiencies, passed, selected_indices, source,
                         direction == "up_" ? "up" : "down", label);
