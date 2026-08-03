@@ -246,7 +246,7 @@ int main(int argc, char** argv) {
             throw std::runtime_error(
                 "B-tag SF application is unsupported for " + metadata.year +
                 "; rerun with --skip-btag-sf");
-        df = applyMCWeights(df, args.ana, metadata.year, applyBTagScaleFactors,
+        df = applyMCWeights(df, args.ana, metadata.sample, metadata.year, applyBTagScaleFactors,
                             bTagWorkingPointsForChannel(args.ana));
     }
 

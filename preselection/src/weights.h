@@ -350,7 +350,7 @@ const std::unordered_map<std::string, std::string> bTaggingScaleFactors_LF_corrn
     {"2025", "UParTAK4_light"}
 };
 
-RNode applyBTaggingScaleFactors(std::unordered_map<std::string, correction::CorrectionSet> cset_btag, std::unordered_map<std::string, std::string> corrname_map_HF, std::unordered_map<std::string, std::string> corrname_map_LF, const std::string &channel, const std::string &nuisance_year, const std::vector<std::string> &working_points, RNode df);
+RNode applyBTaggingScaleFactors(std::unordered_map<std::string, correction::CorrectionSet> cset_btag, std::unordered_map<std::string, std::string> corrname_map_HF, std::unordered_map<std::string, std::string> corrname_map_LF, const std::string &channel, const std::string &sample, const std::string &nuisance_year, const std::vector<std::string> &working_points, RNode df);
 void resetBTagDiagnostics();
 void printBTagDiagnostics(std::ostream &out = std::cout);
 
@@ -371,7 +371,7 @@ RNode applyLHEScaleWeight_muR(RNode df);
 RNode applyLHEWeights_pdf(RNode df);
 
 RNode applyDataWeights(RNode df);
-RNode applyMCWeights(RNode df, const std::string &channel, const std::string &nuisance_year,
+RNode applyMCWeights(RNode df, const std::string &channel, const std::string &sample, const std::string &nuisance_year,
                      bool apply_btag_sf, const std::vector<std::string> &btag_working_points = {});
 
 #endif //WEIGHTS
