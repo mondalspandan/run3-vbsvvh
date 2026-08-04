@@ -495,7 +495,8 @@ def fallback_efficiencies(target, consensus_candidates):
             if source is None: raise ValueError(f"No valid efficiency fallback for {flavor} at bin {(int(pt), int(eta))}")
             reason = ("denominator-level failure" if denominator_quality_failure(
                           target[0], target[1], flavor, pt, eta)
-                      else ("unavoidable nesting expansion" if (lo, hi) != initial_span
+                      else ("unavoidable nesting expansion" if (lo, hi) != initial_span or
+                            initial_span == (0, len(INCLUSIVE_WPS) - 1)
                             else "component quality failure"))
             replacements.append((flavor, INCLUSIVE_WPS[lo], INCLUSIVE_WPS[hi], [int(pt), int(eta)], source, reason))
     if any(not np.all(np.isfinite(final_eff[key])) or not np.all(np.isfinite(final_unc[key]))
