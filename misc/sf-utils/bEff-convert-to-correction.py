@@ -392,6 +392,18 @@ def efficiency_maps(counts, variances):
     return eff, unc
 
 
+def terminal_physical_valid(eff, unc, flavor, pt, eta):
+    values = [float(eff[flavor, wp][pt, eta]) for wp in INCLUSIVE_WPS]
+    errors = [float(unc[flavor, wp][pt, eta]) for wp in INCLUSIVE_WPS]
+    if any(not np.isfinite(x) or x < 0. or x > 1. for x in values):
+        return False
+    if any(not np.isfinite(x) or x < 0. for x in errors):
+        return False
+    if any(values[i] > values[i - 1] + 1.e-12 for i in range(1, len(values))):
+        return False
+    return True
+
+
 def fallback_efficiencies(target, consensus_candidates):
     target_eff, target_unc = efficiency_maps(*target)
     bad = {flavor: np.zeros_like(target_eff[flavor, INCLUSIVE_WPS[0]], dtype=bool) for flavor in FLAVORS}
@@ -416,11 +428,15 @@ def fallback_efficiencies(target, consensus_candidates):
             if not initial: initial = list(range(len(INCLUSIVE_WPS)))
             lo, hi = min(initial), max(initial)
             source = None
-            for name, candidate in consensus_candidates:
+            for name, candidate, cc, cv, strict in consensus_candidates:
                 ce, cu = candidate
-                if any(not np.isfinite(ce[flavor, wp][pt, eta]) or not np.isfinite(cu[flavor, wp][pt, eta])
-                       or ce[flavor, wp][pt, eta] < 0 or ce[flavor, wp][pt, eta] > 1
-                       for wp in INCLUSIVE_WPS): continue
+                if not terminal_physical_valid(ce, cu, flavor, pt, eta): continue
+                if strict:
+                    region = {"counts": {state: cc[flavor, state][pt:pt+1, eta:eta+1]
+                                          for state in HISTOGRAM_STATES},
+                              "variances": {state: cv[flavor, state][pt:pt+1, eta:eta+1]
+                                            for state in HISTOGRAM_STATES}}
+                    if region_quality(region, flavor, 1)[0]: continue
                 while True:
                     values = [final_eff[flavor, wp][pt, eta] for wp in INCLUSIVE_WPS]
                     for i in range(lo, hi + 1): values[i] = ce[flavor, INCLUSIVE_WPS[i]][pt, eta]
@@ -629,7 +645,8 @@ def update_output(path, correction_specs, replace_entries=False, replace_correct
     path.write_text(json.dumps(payload, indent=2) + "\n")
 
 
-def grouped_specs(prefix, grouped_counts, grouped_variances, grouped_edges, members):
+def grouped_specs(prefix, grouped_counts, grouped_variances, grouped_edges, members,
+                  year_inclusive_candidate=None):
     inclusive_counts, inclusive_variances = {}, {}
     for group in members:
         add_counts(inclusive_counts, grouped_counts[group])
@@ -655,8 +672,12 @@ def grouped_specs(prefix, grouped_counts, grouped_variances, grouped_edges, memb
                 consensus_counts, consensus_variances)
         candidates = []
         if other_groups:
-            candidates.append(("channel-family consensus", efficiency_maps(consensus_counts, consensus_variances)))
-        candidates.append(("all-MC inclusive consensus", efficiency_maps(inclusive_counts, inclusive_variances)))
+            candidates.append(("channel-family consensus", efficiency_maps(consensus_counts, consensus_variances),
+                              consensus_counts, consensus_variances, True))
+        candidates.append(("all-MC inclusive consensus", efficiency_maps(inclusive_counts, inclusive_variances),
+                          inclusive_counts, inclusive_variances, False))
+        if year_inclusive_candidate is not None:
+            candidates.append(("same-year all-channel inclusive", *year_inclusive_candidate, False))
         target_maps = (counts, variances)
         efficiency_values, mcstat_uncertainties, fallback_bins = fallback_efficiencies(target_maps, candidates)
         if fallback_bins:
@@ -760,6 +781,14 @@ def main():
         config = load_config(year=args.year)
         counts, variances, edges, members, completeness, ignored = discover_final_histograms(
             args.input_root, args.year, config)
+        year_counts, year_variances = {}, {}
+        for value in counts.values():
+            add_counts(year_counts, value)
+        for value in variances.values():
+            add_counts(year_variances, value)
+        year_counts, year_variances, _ = merge_invalid_bins_downward(year_counts, year_variances)
+        year_inclusive_candidate = (efficiency_maps(year_counts, year_variances),
+                                    year_counts, year_variances)
         specs, fallbacks, adaptive_merges = [], {}, {}
         for channel, final_members in sorted(members.items()):
             keys = {(channel, sample) for sample in final_members}
@@ -767,7 +796,8 @@ def main():
             channel_variances = {sample: variances[channel, sample] for _, sample in keys}
             channel_edges = {sample: edges[channel, sample] for _, sample in keys}
             channel_specs, channel_fallbacks, channel_merges = grouped_specs(
-                f"btag_{args.year}_{channel}", channel_counts, channel_variances, channel_edges, final_members)
+                f"btag_{args.year}_{channel}", channel_counts, channel_variances, channel_edges,
+                final_members, year_inclusive_candidate)
             specs.extend(channel_specs)
             fallbacks[channel] = channel_fallbacks
             adaptive_merges[channel] = channel_merges
