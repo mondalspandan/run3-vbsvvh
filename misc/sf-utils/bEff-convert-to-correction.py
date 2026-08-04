@@ -345,50 +345,40 @@ def region_quality(region, flavor, neta):
     """Shared complete quality criterion for adaptive and final regions."""
     c, v, d = region["counts"], region["variances"], region["counts"]["den"]
     scale = max(1., *(float(np.max(np.abs(c[state]))) for state in HISTOGRAM_STATES))
-    bad, score = False, 0.
-    affected = np.zeros(len(INCLUSIVE_WPS), dtype=bool)
-    def violation(amount):
+    bad, score = False, 0.; affected = np.zeros(len(INCLUSIVE_WPS), dtype=bool)
+    bounds = {"N": (0,), "LnotM": (0, 1), "MnotT": (1, 2), "TnotXT": (2, 3), "XTnotXXT": (3, 4), "XXT": (4,)}
+    def violation(amount, indices=()):
         nonlocal bad, score
-        if amount > 0.: bad, score = True, score + amount
+        if amount > 0.: bad, score = True, score + amount; affected[list(indices)] = True
     for eta in range(neta):
         den, var_den = float(d[eta]), float(v["den"][eta])
         if not np.isfinite(den) or not np.isfinite(var_den) or den <= 1.e-10 * scale or var_den < 0:
-            violation(10.); affected[:] = True; continue
+            violation(10., range(5)); continue
         significance = den / np.sqrt(var_den) if var_den > 0 else np.inf
         neff = den * den / var_den if var_den > 0 else np.inf
-        violation(MIN_DENOMINATOR_SIGNIFICANCE / max(significance, 1.e-12) - 1.)
-        violation(MIN_EFFECTIVE_DENOMINATOR[flavor] / max(neff, 1.e-12) - 1.)
+        violation(MIN_DENOMINATOR_SIGNIFICANCE / max(significance, 1.e-12) - 1., range(5))
+        violation(MIN_EFFECTIVE_DENOMINATOR[flavor] / max(neff, 1.e-12) - 1., range(5))
         inclusive = {wp: float(c[wp][eta]) for wp in INCLUSIVE_WPS}
         exclusive = {cat: float(c[cat][eta]) for cat in EXCLUSIVE_CATEGORIES}
-        violation(max(0., -exclusive["N"]) / max(scale, 1.))
+        violation(max(0., -exclusive["N"]) / max(scale, 1.), bounds["N"])
         for left, right in zip(INCLUSIVE_WPS[:-1], INCLUSIVE_WPS[1:]):
-            amount = max(0., inclusive[right] - inclusive[left]) / max(scale, 1.)
-            violation(amount)
-            if amount > 0.:
-                affected[INCLUSIVE_WPS.index(left)] = True
-                affected[INCLUSIVE_WPS.index(right)] = True
-        violation(max(0., inclusive["L"] - den) / max(scale, 1.))
-        for parent, category, child in (("L","LnotM","M"),("M","MnotT","T"),
-                                         ("T","TnotXT","XT"),("XT","XTnotXXT","XXT")):
-            violation(abs(inclusive[parent] - exclusive[category] - inclusive[child]) /
-                      max(scale, 1.) - 1.e-10)
-        violation(abs(den - sum(exclusive.values())) / max(scale, 1.) - 1.e-10)
+            violation(max(0., inclusive[right] - inclusive[left]) / max(scale, 1.),
+                      (INCLUSIVE_WPS.index(left), INCLUSIVE_WPS.index(right)))
+        violation(max(0., inclusive["L"] - den) / max(scale, 1.), bounds["N"])
+        for parent, category, child in (("L","LnotM","M"),("M","MnotT","T"),("T","TnotXT","XT"),("XT","XTnotXXT","XXT")):
+            violation(abs(inclusive[parent] - exclusive[category] - inclusive[child]) / max(scale, 1.) - 1.e-10, bounds[category])
+        violation(abs(den - sum(exclusive.values())) / max(scale, 1.) - 1.e-10, range(5))
         for wp in INCLUSIVE_WPS:
-            unc = float(mcstat_efficiency_uncertainty(np.asarray([inclusive[wp]]), np.asarray([den]),
-                                                       np.asarray([float(v[wp][eta])]), np.asarray([var_den]))[0])
-            amount = 10. if not np.isfinite(unc) else unc / MAX_EFFICIENCY_UNCERTAINTY[wp] - 1.
-            violation(amount)
-            if amount > 0.: affected[INCLUSIVE_WPS.index(wp)] = True
+            unc = float(mcstat_efficiency_uncertainty(np.asarray([inclusive[wp]]), np.asarray([den]), np.asarray([float(v[wp][eta])]), np.asarray([var_den]))[0])
+            violation(10. if not np.isfinite(unc) else unc / MAX_EFFICIENCY_UNCERTAINTY[wp] - 1., (INCLUSIVE_WPS.index(wp),))
         for category in EXCLUSIVE_CATEGORIES:
             value, variance = exclusive[category], float(v[category][eta])
-            if value < 0.:
-                violation(10.)
-                affected[max(0, EXCLUSIVE_CATEGORIES.index(category)-1):] = True
+            violation(10., bounds[category]) if value < 0. else None
             if value > 1.e-10 * scale and variance > 0:
-                violation(MIN_EFFECTIVE_CATEGORY[flavor] / max(value * value / variance, 1.e-12) - 1.)
-                unc = float(mcstat_efficiency_uncertainty(np.asarray([value]), np.asarray([den]),
-                                                           np.asarray([variance]), np.asarray([var_den]))[0])
-                violation(10. if not np.isfinite(unc) else unc / MAX_CATEGORY_UNCERTAINTY - 1.)
+                violation(MIN_EFFECTIVE_CATEGORY[flavor] / max(value * value / variance, 1.e-12) - 1., bounds[category])
+                unc = float(mcstat_efficiency_uncertainty(np.asarray([value]), np.asarray([den]), np.asarray([variance]), np.asarray([var_den]))[0])
+                violation(10. if not np.isfinite(unc) else unc / MAX_CATEGORY_UNCERTAINTY - 1., bounds[category])
+    if bad and not np.any(affected): raise AssertionError(f"Quality failure without affected WP for {flavor}")
     return bad, score, affected
 
 
@@ -401,7 +391,7 @@ def efficiency_maps(counts, variances):
     return eff, unc
 
 
-def terminal_physical_valid(eff, unc, counts, variances, flavor, pt, eta):
+def terminal_sequence_valid(eff, unc, counts, flavor, pt, eta):
     denominator = float(counts[flavor, "den"][pt, eta])
     if not np.isfinite(denominator) or denominator <= 0.: return False
     values = [float(eff[flavor, wp][pt, eta]) for wp in INCLUSIVE_WPS]
@@ -413,6 +403,26 @@ def terminal_physical_valid(eff, unc, counts, variances, flavor, pt, eta):
     if any(values[i] > values[i - 1] + 1.e-12 for i in range(1, len(values))):
         return False
     return True
+
+
+def terminal_component_valid(eff, unc, counts, flavor, wp, pt, eta):
+    den = float(counts[flavor, "den"][pt, eta]); num = float(counts[flavor, wp][pt, eta])
+    value, error = float(eff[flavor, wp][pt, eta]), float(unc[flavor, wp][pt, eta])
+    return (np.isfinite(den) and den > 0. and np.isfinite(num) and
+            np.isfinite(value) and 0. <= value <= 1. and np.isfinite(error) and error >= 0.)
+
+
+def denominator_quality_failure(counts, variances, flavor, pt, eta):
+    den = float(counts[flavor, "den"][pt, eta])
+    var = float(variances[flavor, "den"][pt, eta])
+    scale = max(1., *(abs(float(counts[flavor, state][pt, eta]))
+                      for state in HISTOGRAM_STATES))
+    if not np.isfinite(den) or not np.isfinite(var) or den <= 1.e-10 * scale or var < 0.:
+        return True
+    significance = den / np.sqrt(var) if var > 0. else np.inf
+    neff = den * den / var if var > 0. else np.inf
+    return (significance < MIN_DENOMINATOR_SIGNIFICANCE or
+            neff < MIN_EFFECTIVE_DENOMINATOR[flavor])
 
 
 def fallback_efficiencies(target, consensus_candidates):
@@ -437,13 +447,13 @@ def fallback_efficiencies(target, consensus_candidates):
         bad_bins = np.logical_or.reduce(list(affected_masks[flavor].values()))
         for pt, eta in np.argwhere(bad_bins):
             initial = [i for i, wp in enumerate(INCLUSIVE_WPS) if affected_masks[flavor][wp][pt, eta] or
-                       not terminal_physical_valid(target_eff, target_unc, target[0], target[1], flavor, pt, eta)]
+                       not terminal_component_valid(target_eff, target_unc, target[0], flavor, wp, pt, eta)]
             if not initial: initial = list(range(len(INCLUSIVE_WPS)))
+            initial_span = (min(initial), max(initial))
             lo, hi = min(initial), max(initial)
             source = None
             for name, candidate, cc, cv, strict in consensus_candidates:
                 ce, cu = candidate
-                if not terminal_physical_valid(ce, cu, cc, cv, flavor, pt, eta): continue
                 if strict:
                     region = {"counts": {state: cc[flavor, state][pt:pt+1, eta:eta+1]
                                           for state in HISTOGRAM_STATES},
@@ -454,6 +464,12 @@ def fallback_efficiencies(target, consensus_candidates):
                     if lo > 0: required.add(lo - 1)
                     if hi + 1 < len(INCLUSIVE_WPS): required.add(hi + 1)
                     if any(candidate_mask[i] for i in required): continue
+                    if any(not terminal_component_valid(ce, cu, cc, flavor,
+                                                         INCLUSIVE_WPS[i], pt, eta)
+                           for i in required):
+                        continue
+                elif not terminal_sequence_valid(ce, cu, cc, flavor, pt, eta):
+                    continue
                 while True:
                     values = [final_eff[flavor, wp][pt, eta] for wp in INCLUSIVE_WPS]
                     for i in range(lo, hi + 1): values[i] = ce[flavor, INCLUSIVE_WPS[i]][pt, eta]
@@ -464,7 +480,11 @@ def fallback_efficiencies(target, consensus_candidates):
                         wp = INCLUSIVE_WPS[i]; final_eff[flavor, wp][pt, eta] = ce[flavor, wp][pt, eta]; final_unc[flavor, wp][pt, eta] = cu[flavor, wp][pt, eta]
                     source = name; break
             if source is None: raise ValueError(f"No valid efficiency fallback for {flavor} at bin {(int(pt), int(eta))}")
-            replacements.append((flavor, INCLUSIVE_WPS[lo], INCLUSIVE_WPS[hi], [int(pt), int(eta)], source))
+            reason = ("denominator-level failure" if denominator_quality_failure(
+                          target[0], target[1], flavor, pt, eta)
+                      else ("unavoidable nesting expansion" if (lo, hi) != initial_span
+                            else "component quality failure"))
+            replacements.append((flavor, INCLUSIVE_WPS[lo], INCLUSIVE_WPS[hi], [int(pt), int(eta)], source, reason))
     if any(not np.all(np.isfinite(final_eff[key])) or not np.all(np.isfinite(final_unc[key]))
            or np.any(final_eff[key] < 0.) or np.any(final_eff[key] > 1.)
            for key in final_eff):
@@ -699,8 +719,8 @@ def grouped_specs(prefix, grouped_counts, grouped_variances, grouped_edges, memb
         efficiency_values, mcstat_uncertainties, fallback_bins = fallback_efficiencies(target_maps, candidates)
         if fallback_bins:
             fallbacks[group] = fallback_bins
-            for flavor, lo, hi, bins, source in fallback_bins:
-                print(f"fallback {prefix} {group} {flavor} {lo}-{hi} {bins} {source}")
+            for flavor, lo, hi, bins, source, reason in fallback_bins:
+                print(f"fallback {prefix} {group} {flavor} {lo}-{hi} {bins} {source} {reason}")
         specs.extend([
             (prefix, sample_category(group, efficiency_values, grouped_edges[group]),
              "Selected-AK4 UParTAK4 b-tag efficiency", "efficiency", "MC tagging efficiency"),
