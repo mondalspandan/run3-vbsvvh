@@ -456,16 +456,27 @@ def fallback_efficiencies(target, consensus_candidates):
                 ce, cu = candidate
                 candidate_lo, candidate_hi = initial_span
                 def candidate_quality(lo_i, hi_i):
+                    required = set(range(lo_i, hi_i + 1))
+                    if lo_i > 0: required.add(lo_i - 1)
+                    if hi_i + 1 < len(INCLUSIVE_WPS): required.add(hi_i + 1)
                     if not strict:
-                        return terminal_sequence_valid(ce, cu, cc, flavor, pt, eta)
+                        component_ok = all(terminal_component_valid(ce, cu, cc, flavor,
+                                                                     INCLUSIVE_WPS[i], pt, eta)
+                                            for i in required)
+                        if not component_ok: return False
+                        mixed = [float(final_eff[flavor, wp][pt, eta])
+                                 for wp in INCLUSIVE_WPS]
+                        for i in range(lo_i, hi_i + 1):
+                            mixed[i] = float(ce[flavor, INCLUSIVE_WPS[i]][pt, eta])
+                        if any(not np.isfinite(mixed[i]) or not 0. <= mixed[i] <= 1.
+                               for i in required):
+                            return False
+                        return True
                     region = {"counts": {state: cc[flavor, state][pt:pt+1, eta:eta+1]
                                           for state in HISTOGRAM_STATES},
                               "variances": {state: cv[flavor, state][pt:pt+1, eta:eta+1]
                                             for state in HISTOGRAM_STATES}}
                     _, _, candidate_mask = region_quality(region, flavor, 1)
-                    required = set(range(lo_i, hi_i + 1))
-                    if lo_i > 0: required.add(lo_i - 1)
-                    if hi_i + 1 < len(INCLUSIVE_WPS): required.add(hi_i + 1)
                     if any(candidate_mask[i] for i in required): return False
                     if any(not terminal_component_valid(ce, cu, cc, flavor,
                                                          INCLUSIVE_WPS[i], pt, eta)
