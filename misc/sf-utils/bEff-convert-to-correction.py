@@ -25,6 +25,21 @@ INCLUSIVE_WPS = ("L", "M", "T", "XT", "XXT")
 EXCLUSIVE_CATEGORIES = ("N", "LnotM", "MnotT", "TnotXT", "XTnotXXT", "XXT")
 HISTOGRAM_STATES = ("den", *INCLUSIVE_WPS, "LnotM", "MnotT", "TnotXT", "XTnotXXT", "N")
 
+# Starting points for adaptive binning.  These are deliberately conservative
+# defaults: the converter still uses the producer's rectangular grid, but
+# replaces low-statistical-quality bins with the yield of an adjacent merged
+# region.  The values are configuration knobs rather than physics constants.
+MIN_EFFECTIVE_DENOMINATOR = {"b": 100.0, "c": 100.0, "light": 200.0}
+MIN_EFFECTIVE_CATEGORY = {"b": 20.0, "c": 20.0, "light": 50.0}
+MAX_EFFICIENCY_UNCERTAINTY = {"L": 0.03, "M": 0.03, "T": 0.03,
+                              "XT": 0.05, "XXT": 0.05}
+MAX_CATEGORY_UNCERTAINTY = 0.05
+MIN_DENOMINATOR_SIGNIFICANCE = 5.0
+MAX_SAMPLE_RELATIVE_UNCERTAINTY = 0.20
+
+# Filled by the discovery helpers for inclusion in the conversion manifest.
+_LAST_SAMPLE_QUALITY = {}
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -215,35 +230,88 @@ def validate_job_manifest(input_dir, manifest_path):
     return discovered
 
 
-def discover_family_histograms(input_dir, year, channel, job_manifest=None, config=None):
-    """Read every exact sample directory and return raw yields grouped by family."""
+def sample_quality(counts, variances):
+    """Classify one sample using integrated post-WP weighted yields."""
+    quality = {}
+    for flavor in FLAVORS:
+        failed = []
+        metrics = {}
+        for wp in INCLUSIVE_WPS:
+            yield_sum = float(np.sum(counts[flavor, wp]))
+            variance = float(np.sum(variances[flavor, wp]))
+            uncertainty = np.sqrt(max(variance, 0.)) if np.isfinite(variance) else np.nan
+            relative = (uncertainty / abs(yield_sum)
+                        if np.isfinite(uncertainty) and yield_sum != 0 else np.inf)
+            metrics[wp] = {"yield": yield_sum, "uncertainty": uncertainty,
+                           "relative_uncertainty": relative}
+            if (not np.isfinite(yield_sum) or yield_sum <= 0 or
+                    not np.isfinite(relative) or relative > MAX_SAMPLE_RELATIVE_UNCERTAINTY):
+                failed.append(wp)
+        quality[flavor] = {"failed_wps": failed, "eligible": not failed, "metrics": metrics}
+    return quality
+
+
+def aggregate_sample_records(records, quality_key, quality_override=None):
+    """Filter exact samples by flavour quality, then merge all histogram states."""
+    if not records:
+        raise ValueError(f"No samples available for {quality_key}")
+    edges = records[0][3]
+    quality_override = quality_override or {}
+    counts, variances, quality_output = {}, {}, {}
+    for sample, sample_counts, sample_variances, sample_edges in records:
+        if not (np.array_equal(edges[0], sample_edges[0]) and np.array_equal(edges[1], sample_edges[1])):
+            raise ValueError(f"Histogram binning differs within {quality_key}")
+        quality_output[sample] = quality_override.get(
+            sample, sample_quality(sample_counts, sample_variances))
+    for flavor in FLAVORS:
+        eligible = [record for record in records if quality_output[record[0]][flavor]["eligible"]]
+        # If every sample fails, retain the complete aggregate and let the
+        # existing physicality/fallback checks decide whether it is usable.
+        if not eligible:
+            eligible = records
+        for state in HISTOGRAM_STATES:
+            values = [record[1][flavor, state] for record in eligible]
+            errors = [record[2][flavor, state] for record in eligible]
+            counts[flavor, state] = np.sum(values, axis=0)
+            variances[flavor, state] = np.sum(errors, axis=0)
+    _LAST_SAMPLE_QUALITY[quality_key] = {
+        sample: quality_output[sample] for sample, _, _, _ in records
+    }
+    return counts, variances, edges, [record[0] for record in records]
+
+
+def discover_sample_histograms(input_dir, year, channel, job_manifest=None, config=None):
+    """Read exact sample outputs without combining them."""
     if not input_dir.is_dir():
         raise ValueError(f"--input-dir is not a directory: {input_dir}")
     completeness = (validate_job_manifest(input_dir, job_manifest) if job_manifest else None)
     if completeness is None:
         print("WARNING: b-tag input completeness was not verified (no --job-manifest supplied)")
-    grouped_counts, grouped_variances, grouped_edges, members = {}, {}, {}, {}
+    samples = []
     for sample_dir in sorted(path for path in input_dir.iterdir() if path.is_dir()):
         roots = sorted(sample_dir.glob("*.root"))
         if not roots:
             # Allow diagnostics/manifests to live beside the sample directories.
             continue
         sample = sample_dir.name
-        family = sample_family(sample, config)
         counts, variances, edges = read_merged_histograms(roots, year, channel, sample)
-        if family in grouped_edges and not (
-            np.array_equal(edges[0], grouped_edges[family][0]) and
-            np.array_equal(edges[1], grouped_edges[family][1])
-        ):
-            raise ValueError(f"Histogram binning for {sample} differs within family {family}")
-        grouped_edges[family] = edges
-        grouped_counts.setdefault(family, {})
-        grouped_variances.setdefault(family, {})
-        add_counts(grouped_counts[family], counts)
-        add_counts(grouped_variances[family], variances)
-        members.setdefault(family, []).append(sample)
-    if not members:
+        samples.append((sample, counts, variances, edges))
+    if not samples:
         raise ValueError(f"No sample directories found in {input_dir}")
+    return samples, completeness
+
+
+def discover_family_histograms(input_dir, year, channel, job_manifest=None, config=None):
+    """Read exact samples and return quality-filtered family aggregates."""
+    samples, completeness = discover_sample_histograms(input_dir, year, channel, job_manifest, config)
+    grouped_counts, grouped_variances, grouped_edges, members = {}, {}, {}, {}
+    for family in sorted({sample_family(sample, config) for sample, _, _, _ in samples}):
+        records = [(sample, counts, variances, edges) for sample, counts, variances, edges in samples
+                   if sample_family(sample, config) == family]
+        counts, variances, edges, family_members = aggregate_sample_records(
+            records, f"{channel}/{family}")
+        grouped_counts[family], grouped_variances[family] = counts, variances
+        grouped_edges[family], members[family] = edges, family_members
     return grouped_counts, grouped_variances, grouped_edges, members, completeness
 
 
@@ -326,38 +394,128 @@ def repair_with_inclusive(counts, variances, inclusive_counts, inclusive_varianc
 
 
 def merge_invalid_bins_downward(counts, variances):
-    """Merge pathological pT bins into the immediately lower bin.
+    """Adaptively merge low-quality pT bins into adjacent regions.
 
-    The merged yield is copied back into the original upper bin so both bins
-    receive the same efficiency.  This preserves the published pT schema while
-    avoiding signed-weight pathologies in sparse high-pT bins.
+    The correction schema intentionally remains rectangular and keeps the
+    producer's pT edges.  Every member of a merged region receives the same
+    summed yields, which is equivalent to publishing a coarser bin while
+    avoiding a schema migration.  All histogram states and Sumw2 values are
+    merged together, so the nesting identities remain exact.
     """
     merged = {key: values.copy() for key, values in counts.items()}
     merged_variances = {key: values.copy() for key, values in variances.items()}
     merged_bins = {}
-    invalid = invalid_count_bins(merged, merged_variances)
     for flavor in FLAVORS:
-        indices = [int(index[0]) for index in np.argwhere(invalid[flavor]) if int(index[0]) > 0]
-        if not indices:
-            continue
-        merged_bins[flavor] = []
-        groups = []
-        for index in indices:
-            if not groups or index != groups[-1][-1] + 1:
-                groups.append([index])
-            else:
-                groups[-1].append(index)
-        for group in groups:
-            lower = group[0] - 1
-            for index in group:
+        npt, neta = merged[flavor, "den"].shape
+        # Each region carries one vector per state and eta bin.  Regions are
+        # merged as units, then expanded back onto the original grid.
+        regions = []
+        for index in range(npt):
+            regions.append({
+                "indices": [index],
+                "counts": {state: merged[flavor, state][index, :].copy()
+                           for state in HISTOGRAM_STATES},
+                "variances": {state: merged_variances[flavor, state][index, :].copy()
+                              for state in HISTOGRAM_STATES},
+            })
+
+        def quality(region):
+            """Return (is_bad, score) for a candidate pT region."""
+            c = region["counts"]
+            v = region["variances"]
+            d = c["den"]
+            scale = max(1.0, *(float(np.max(np.abs(c[state]))) for state in HISTOGRAM_STATES))
+            tol = 1.e-10 * scale
+            score = 0.0
+            bad = False
+
+            def violation(amount):
+                nonlocal bad, score
+                if amount > 0:
+                    bad = True
+                    score += amount
+
+            for eta in range(neta):
+                den = float(d[eta])
+                var_den = float(v["den"][eta])
+                if not np.isfinite(den) or not np.isfinite(var_den) or den <= tol or var_den < 0:
+                    violation(10.0)
+                    continue
+                significance = den / np.sqrt(var_den) if var_den > 0 else np.inf
+                violation(MIN_DENOMINATOR_SIGNIFICANCE / max(significance, 1.e-12) - 1.)
+                neff = den * den / var_den if var_den > 0 else np.inf
+                violation(MIN_EFFECTIVE_DENOMINATOR[flavor] / max(neff, 1.e-12) - 1.)
+
+                inclusive = {wp: float(c[wp][eta]) for wp in INCLUSIVE_WPS}
+                exclusive = {cat: float(c[cat][eta]) for cat in EXCLUSIVE_CATEGORIES}
+                violation(max(0., -exclusive["N"] / max(tol, 1.e-12)))
+                violation(max(0., -inclusive["XXT"] / max(tol, 1.e-12)))
+                for left, right in (("L", "M"), ("M", "T"), ("T", "XT"), ("XT", "XXT")):
+                    violation(max(0., inclusive[right] - inclusive[left] - tol) / max(scale, 1.))
+                violation(max(0., inclusive["L"] - den - tol) / max(scale, 1.))
+                identities = (
+                    ("L", "LnotM", "M"), ("M", "MnotT", "T"),
+                    ("T", "TnotXT", "XT"), ("XT", "XTnotXXT", "XXT"),
+                )
+                for parent, category, child in identities:
+                    violation(abs(inclusive[parent] - exclusive[category] - inclusive[child]) /
+                              max(scale, 1.) - 1.e-10)
+                violation(abs(den - sum(exclusive.values())) / max(scale, 1.) - 1.e-10)
+
+                for wp in INCLUSIVE_WPS:
+                    unc = float(mcstat_efficiency_uncertainty(
+                        np.asarray([inclusive[wp]]), np.asarray([den]),
+                        np.asarray([v[wp][eta]]), np.asarray([var_den]))[0])
+                    if not np.isfinite(unc):
+                        violation(10.0)
+                    else:
+                        violation(unc / MAX_EFFICIENCY_UNCERTAINTY[wp] - 1.)
+                for category in EXCLUSIVE_CATEGORIES:
+                    value = exclusive[category]
+                    variance = float(v[category][eta])
+                    if value > tol and variance > 0:
+                        category_neff = value * value / variance
+                        violation(MIN_EFFECTIVE_CATEGORY[flavor] / max(category_neff, 1.e-12) - 1.)
+                    unc = float(mcstat_efficiency_uncertainty(
+                        np.asarray([value]), np.asarray([den]),
+                        np.asarray([variance]), np.asarray([var_den]))[0])
+                    if value > tol and (not np.isfinite(unc) or unc > MAX_CATEGORY_UNCERTAINTY):
+                        violation(10.0 if not np.isfinite(unc) else unc / MAX_CATEGORY_UNCERTAINTY - 1.)
+            return bad, score
+
+        while True:
+            bad_regions = [i for i, region in enumerate(regions) if quality(region)[0]]
+            if not bad_regions or len(regions) == 1:
+                break
+            # Merge the most problematic region first.  Evaluate both
+            # neighbours and choose the candidate with the best resulting
+            # quality; ties deterministically prefer lower pT.
+            index = max(bad_regions, key=lambda i: quality(regions[i])[1])
+            candidates = []
+            for neighbour in (index - 1, index + 1):
+                if 0 <= neighbour < len(regions):
+                    combined = {
+                        "indices": regions[index]["indices"] + regions[neighbour]["indices"],
+                        "counts": {state: regions[index]["counts"][state] + regions[neighbour]["counts"][state]
+                                   for state in HISTOGRAM_STATES},
+                        "variances": {state: regions[index]["variances"][state] + regions[neighbour]["variances"][state]
+                                      for state in HISTOGRAM_STATES},
+                    }
+                    candidates.append((quality(combined), neighbour, combined))
+            if not candidates:
+                break
+            _, neighbour, combined = min(candidates, key=lambda item: (item[0][0], item[0][1], item[1]))
+            first, second = sorted((index, neighbour))
+            regions[first] = combined
+            del regions[second]
+            merged_bins.setdefault(flavor, []).append(sorted(combined["indices"]))
+
+        # Expand the adaptive regions back to the fixed correction grid.
+        for region in regions:
+            for index in region["indices"]:
                 for state in HISTOGRAM_STATES:
-                    merged[flavor, state][lower, :] += merged[flavor, state][index, :]
-                    merged_variances[flavor, state][lower, :] += merged_variances[flavor, state][index, :]
-            for index in group:
-                for state in HISTOGRAM_STATES:
-                    merged[flavor, state][index, :] = merged[flavor, state][lower, :]
-                    merged_variances[flavor, state][index, :] = merged_variances[flavor, state][lower, :]
-            merged_bins[flavor].extend([ [index, lower] for index in group ])
+                    merged[flavor, state][index, :] = region["counts"][state]
+                    merged_variances[flavor, state][index, :] = region["variances"][state]
     return merged, merged_variances, merged_bins
 
 
@@ -493,14 +651,15 @@ def grouped_specs(prefix, grouped_counts, grouped_variances, grouped_edges, memb
     inclusive_counts, inclusive_variances, inclusive_merged_bins = merge_invalid_bins_downward(
         inclusive_counts, inclusive_variances)
     if inclusive_merged_bins:
-        print(f"inclusive: merged pathological pT bins into their lower neighbors: {inclusive_merged_bins}")
+        print(f"inclusive: adaptive pT merges: {inclusive_merged_bins}")
     validate_counts(inclusive_counts, inclusive_variances)
-    specs, fallbacks = [], {}
+    specs, fallbacks, adaptive_merges = [], {}, {"inclusive": inclusive_merged_bins}
     for group in sorted(members):
         counts, variances, merged_bins = merge_invalid_bins_downward(
             grouped_counts[group], grouped_variances[group])
         if merged_bins:
-            print(f"{group}: merged pathological pT bins into their lower neighbors: {merged_bins}")
+            print(f"{group}: adaptive pT merges: {merged_bins}")
+        adaptive_merges[group] = merged_bins
         counts, variances, fallback_bins = repair_with_inclusive(
             counts, variances, inclusive_counts, inclusive_variances)
         if fallback_bins:
@@ -516,7 +675,7 @@ def grouped_specs(prefix, grouped_counts, grouped_variances, grouped_edges, memb
              "Weighted-binomial MC-statistical uncertainty of selected-AK4 UParTAK4 b-tag efficiency", "uncertainty",
              "Weighted-binomial MC tagging-efficiency uncertainty"),
         ])
-    return specs, fallbacks
+    return specs, fallbacks, adaptive_merges
 
 
 def discover_final_inputs(input_root, year, config=None):
@@ -567,25 +726,29 @@ def discover_source_histograms(input_root, year, config=None):
 def discover_final_histograms(input_root, year, config=None):
     """Merge all YAML-retained raw outputs into final channel/sample groups."""
     config = load_config(year) if config is None else config
-    source_counts, source_variances, source_edges, source_members, completeness, ignored = discover_source_histograms(
-        input_root, year, config)
-    grouped_counts, grouped_variances, grouped_edges, members = {}, {}, {}, {}
-    for (channel, preliminary_family), counts in source_counts.items():
-        target_channel = final_channel(channel, config)
-        target_sample = final_group("samples", preliminary_family, config)
-        target = (target_channel, target_sample)
-        if target in grouped_edges and not (
-            np.array_equal(source_edges[channel, preliminary_family][0], grouped_edges[target][0]) and
-            np.array_equal(source_edges[channel, preliminary_family][1], grouped_edges[target][1])
-        ):
-            raise ValueError(f"Histogram binning differs within final group {target}")
-        grouped_edges[target] = source_edges[channel, preliminary_family]
-        grouped_counts.setdefault(target, {})
-        grouped_variances.setdefault(target, {})
-        add_counts(grouped_counts[target], counts)
-        add_counts(grouped_variances[target], source_variances[channel, preliminary_family])
-        members.setdefault(target_channel, {}).setdefault(target_sample, []).extend(
-            [f"{channel}:{sample}" for sample in source_members[channel, preliminary_family]])
+    channel_inputs, channel_manifests, ignored = discover_final_inputs(input_root, year, config)
+    records_by_target, quality_by_target, completeness, members = {}, {}, {}, {}
+    for channel, input_dir in channel_inputs.items():
+        samples, checked = discover_sample_histograms(
+            input_dir, year, channel, channel_manifests[channel], config)
+        completeness[channel] = checked
+        by_family = {}
+        for sample, counts, variances, edges in samples:
+            by_family.setdefault(sample_family(sample, config), []).append(
+                (sample, counts, variances, edges))
+        for preliminary_family, family_records in by_family.items():
+            target = (final_channel(channel, config),
+                      final_group("samples", preliminary_family, config))
+            for sample, counts, variances, edges in family_records:
+                key = f"{channel}:{sample}"
+                records_by_target.setdefault(target, []).append((key, counts, variances, edges))
+                quality_by_target.setdefault(target, {})[key] = sample_quality(counts, variances)
+                members.setdefault(target[0], {}).setdefault(target[1], []).append(key)
+    grouped_counts, grouped_variances, grouped_edges = {}, {}, {}
+    for target, records in records_by_target.items():
+        counts, variances, edges, _ = aggregate_sample_records(
+            records, f"{target[0]}/{target[1]}", quality_by_target[target])
+        grouped_counts[target], grouped_variances[target], grouped_edges[target] = counts, variances, edges
     return grouped_counts, grouped_variances, grouped_edges, members, completeness, ignored
 
 
@@ -604,16 +767,17 @@ def main():
         config = load_config(year=args.year)
         counts, variances, edges, members, completeness, ignored = discover_final_histograms(
             args.input_root, args.year, config)
-        specs, fallbacks = [], {}
+        specs, fallbacks, adaptive_merges = [], {}, {}
         for channel, final_members in sorted(members.items()):
             keys = {(channel, sample) for sample in final_members}
             channel_counts = {sample: counts[channel, sample] for _, sample in keys}
             channel_variances = {sample: variances[channel, sample] for _, sample in keys}
             channel_edges = {sample: edges[channel, sample] for _, sample in keys}
-            channel_specs, channel_fallbacks = grouped_specs(
+            channel_specs, channel_fallbacks, channel_merges = grouped_specs(
                 f"btag_{args.year}_{channel}", channel_counts, channel_variances, channel_edges, final_members)
             specs.extend(channel_specs)
             fallbacks[channel] = channel_fallbacks
+            adaptive_merges[channel] = channel_merges
         update_output(args.output, specs, replace_entries=True,
                       replace_correction_prefix=f"btag_{args.year}_")
         manifest = args.manifest or args.output.with_name(
@@ -623,6 +787,8 @@ def main():
             "retained_source_channels": list(retained_source_channels(config)),
             "ignored_source_channels": ignored,
             "final_members": members, "inclusive_fallback_bins": fallbacks,
+            "adaptive_pT_merges": adaptive_merges,
+            "sample_quality": _LAST_SAMPLE_QUALITY,
             "input_completeness_verified": True,
             "job_counts": completeness,
         }, indent=2) + "\n")
@@ -637,7 +803,7 @@ def main():
     if args.input_dir:
         grouped_counts, grouped_variances, grouped_edges, members, completeness = discover_family_histograms(
             args.input_dir, args.year, args.channel, args.job_manifest, load_config(year=args.year))
-        specs, fallbacks = grouped_specs(prefix, grouped_counts, grouped_variances, grouped_edges, members)
+        specs, fallbacks, adaptive_merges = grouped_specs(prefix, grouped_counts, grouped_variances, grouped_edges, members)
         update_output(args.output, specs, replace_entries=True)
         manifest = args.manifest or args.output.with_name(
             f"btag_eff_{args.year}_{args.channel}_families.json")
@@ -646,6 +812,8 @@ def main():
             "mode": "preliminary",
             "input_dir": str(args.input_dir), "families": members,
             "inclusive_fallback_bins": fallbacks,
+            "adaptive_pT_merges": adaptive_merges,
+            "sample_quality": _LAST_SAMPLE_QUALITY,
             "input_completeness_verified": completeness is not None,
             "job_counts": completeness or {},
         }, indent=2) + "\n")
