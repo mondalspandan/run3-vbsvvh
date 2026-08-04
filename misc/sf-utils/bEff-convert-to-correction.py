@@ -346,13 +346,14 @@ def region_quality(region, flavor, neta):
     c, v, d = region["counts"], region["variances"], region["counts"]["den"]
     scale = max(1., *(float(np.max(np.abs(c[state]))) for state in HISTOGRAM_STATES))
     bad, score = False, 0.
+    affected = np.zeros(len(INCLUSIVE_WPS), dtype=bool)
     def violation(amount):
         nonlocal bad, score
         if amount > 0.: bad, score = True, score + amount
     for eta in range(neta):
         den, var_den = float(d[eta]), float(v["den"][eta])
         if not np.isfinite(den) or not np.isfinite(var_den) or den <= 1.e-10 * scale or var_den < 0:
-            violation(10.); continue
+            violation(10.); affected[:] = True; continue
         significance = den / np.sqrt(var_den) if var_den > 0 else np.inf
         neff = den * den / var_den if var_den > 0 else np.inf
         violation(MIN_DENOMINATOR_SIGNIFICANCE / max(significance, 1.e-12) - 1.)
@@ -361,7 +362,11 @@ def region_quality(region, flavor, neta):
         exclusive = {cat: float(c[cat][eta]) for cat in EXCLUSIVE_CATEGORIES}
         violation(max(0., -exclusive["N"]) / max(scale, 1.))
         for left, right in zip(INCLUSIVE_WPS[:-1], INCLUSIVE_WPS[1:]):
-            violation(max(0., inclusive[right] - inclusive[left]) / max(scale, 1.))
+            amount = max(0., inclusive[right] - inclusive[left]) / max(scale, 1.)
+            violation(amount)
+            if amount > 0.:
+                affected[INCLUSIVE_WPS.index(left)] = True
+                affected[INCLUSIVE_WPS.index(right)] = True
         violation(max(0., inclusive["L"] - den) / max(scale, 1.))
         for parent, category, child in (("L","LnotM","M"),("M","MnotT","T"),
                                          ("T","TnotXT","XT"),("XT","XTnotXXT","XXT")):
@@ -371,16 +376,20 @@ def region_quality(region, flavor, neta):
         for wp in INCLUSIVE_WPS:
             unc = float(mcstat_efficiency_uncertainty(np.asarray([inclusive[wp]]), np.asarray([den]),
                                                        np.asarray([float(v[wp][eta])]), np.asarray([var_den]))[0])
-            violation(10. if not np.isfinite(unc) else unc / MAX_EFFICIENCY_UNCERTAINTY[wp] - 1.)
+            amount = 10. if not np.isfinite(unc) else unc / MAX_EFFICIENCY_UNCERTAINTY[wp] - 1.
+            violation(amount)
+            if amount > 0.: affected[INCLUSIVE_WPS.index(wp)] = True
         for category in EXCLUSIVE_CATEGORIES:
             value, variance = exclusive[category], float(v[category][eta])
-            if value < 0.: violation(10.)
+            if value < 0.:
+                violation(10.)
+                affected[max(0, EXCLUSIVE_CATEGORIES.index(category)-1):] = True
             if value > 1.e-10 * scale and variance > 0:
                 violation(MIN_EFFECTIVE_CATEGORY[flavor] / max(value * value / variance, 1.e-12) - 1.)
                 unc = float(mcstat_efficiency_uncertainty(np.asarray([value]), np.asarray([den]),
                                                            np.asarray([variance]), np.asarray([var_den]))[0])
                 violation(10. if not np.isfinite(unc) else unc / MAX_CATEGORY_UNCERTAINTY - 1.)
-    return bad, score
+    return bad, score, affected
 
 
 def efficiency_maps(counts, variances):
@@ -392,7 +401,9 @@ def efficiency_maps(counts, variances):
     return eff, unc
 
 
-def terminal_physical_valid(eff, unc, flavor, pt, eta):
+def terminal_physical_valid(eff, unc, counts, variances, flavor, pt, eta):
+    denominator = float(counts[flavor, "den"][pt, eta])
+    if not np.isfinite(denominator) or denominator <= 0.: return False
     values = [float(eff[flavor, wp][pt, eta]) for wp in INCLUSIVE_WPS]
     errors = [float(unc[flavor, wp][pt, eta]) for wp in INCLUSIVE_WPS]
     if any(not np.isfinite(x) or x < 0. or x > 1. for x in values):
@@ -406,7 +417,8 @@ def terminal_physical_valid(eff, unc, flavor, pt, eta):
 
 def fallback_efficiencies(target, consensus_candidates):
     target_eff, target_unc = efficiency_maps(*target)
-    bad = {flavor: np.zeros_like(target_eff[flavor, INCLUSIVE_WPS[0]], dtype=bool) for flavor in FLAVORS}
+    affected_masks = {flavor: {wp: np.zeros_like(target_eff[flavor, wp], dtype=bool)
+                               for wp in INCLUSIVE_WPS} for flavor in FLAVORS}
     for flavor in FLAVORS:
         # Regions that still fail the complete post-merge quality criterion.
         shape = target_eff[flavor, INCLUSIVE_WPS[0]].shape
@@ -416,27 +428,32 @@ def fallback_efficiencies(target, consensus_candidates):
                                       for state in HISTOGRAM_STATES},
                           "variances": {state: target[1][flavor, state][pt:pt+1, eta:eta+1]
                                         for state in HISTOGRAM_STATES}}
-                if region_quality(region, flavor, 1)[0]: bad[flavor][pt, eta] = True
+                bad_region, _, wp_mask = region_quality(region, flavor, 1)
+                if bad_region:
+                    for i, wp in enumerate(INCLUSIVE_WPS): affected_masks[flavor][wp][pt, eta] = wp_mask[i]
     replacements = []
     final_eff, final_unc = dict(target_eff), dict(target_unc)
     for flavor in FLAVORS:
-        for pt, eta in np.argwhere(bad[flavor]):
-            initial = [i for i, wp in enumerate(INCLUSIVE_WPS)
-                       if not np.isfinite(target_eff[flavor, wp][pt, eta]) or
-                       not np.isfinite(target_unc[flavor, wp][pt, eta]) or
-                       target_eff[flavor, wp][pt, eta] < 0 or target_eff[flavor, wp][pt, eta] > 1]
+        bad_bins = np.logical_or.reduce(list(affected_masks[flavor].values()))
+        for pt, eta in np.argwhere(bad_bins):
+            initial = [i for i, wp in enumerate(INCLUSIVE_WPS) if affected_masks[flavor][wp][pt, eta] or
+                       not terminal_physical_valid(target_eff, target_unc, target[0], target[1], flavor, pt, eta)]
             if not initial: initial = list(range(len(INCLUSIVE_WPS)))
             lo, hi = min(initial), max(initial)
             source = None
             for name, candidate, cc, cv, strict in consensus_candidates:
                 ce, cu = candidate
-                if not terminal_physical_valid(ce, cu, flavor, pt, eta): continue
+                if not terminal_physical_valid(ce, cu, cc, cv, flavor, pt, eta): continue
                 if strict:
                     region = {"counts": {state: cc[flavor, state][pt:pt+1, eta:eta+1]
                                           for state in HISTOGRAM_STATES},
                               "variances": {state: cv[flavor, state][pt:pt+1, eta:eta+1]
                                             for state in HISTOGRAM_STATES}}
-                    if region_quality(region, flavor, 1)[0]: continue
+                    _, _, candidate_mask = region_quality(region, flavor, 1)
+                    required = set(range(lo, hi + 1))
+                    if lo > 0: required.add(lo - 1)
+                    if hi + 1 < len(INCLUSIVE_WPS): required.add(hi + 1)
+                    if any(candidate_mask[i] for i in required): continue
                 while True:
                     values = [final_eff[flavor, wp][pt, eta] for wp in INCLUSIVE_WPS]
                     for i in range(lo, hi + 1): values[i] = ce[flavor, INCLUSIVE_WPS[i]][pt, eta]
