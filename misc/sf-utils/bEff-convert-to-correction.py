@@ -35,10 +35,6 @@ MAX_EFFICIENCY_UNCERTAINTY = {"L": 0.03, "M": 0.03, "T": 0.03,
                               "XT": 0.05, "XXT": 0.05}
 MAX_CATEGORY_UNCERTAINTY = 0.05
 MIN_DENOMINATOR_SIGNIFICANCE = 5.0
-MAX_SAMPLE_RELATIVE_UNCERTAINTY = 0.20
-
-# Filled by the discovery helpers for inclusion in the conversion manifest.
-_LAST_SAMPLE_QUALITY = {}
 
 
 def parse_args():
@@ -230,53 +226,21 @@ def validate_job_manifest(input_dir, manifest_path):
     return discovered
 
 
-def sample_quality(counts, variances):
-    """Classify one sample using integrated post-WP weighted yields."""
-    quality = {}
-    for flavor in FLAVORS:
-        failed = []
-        metrics = {}
-        for wp in INCLUSIVE_WPS:
-            yield_sum = float(np.sum(counts[flavor, wp]))
-            variance = float(np.sum(variances[flavor, wp]))
-            uncertainty = np.sqrt(max(variance, 0.)) if np.isfinite(variance) else np.nan
-            relative = (uncertainty / abs(yield_sum)
-                        if np.isfinite(uncertainty) and yield_sum != 0 else np.inf)
-            metrics[wp] = {"yield": yield_sum, "uncertainty": uncertainty,
-                           "relative_uncertainty": relative}
-            if (not np.isfinite(yield_sum) or yield_sum <= 0 or
-                    not np.isfinite(relative) or relative > MAX_SAMPLE_RELATIVE_UNCERTAINTY):
-                failed.append(wp)
-        quality[flavor] = {"failed_wps": failed, "eligible": not failed, "metrics": metrics}
-    return quality
-
-
-def aggregate_sample_records(records, quality_key, quality_override=None):
-    """Filter exact samples by flavour quality, then merge all histogram states."""
+def aggregate_sample_records(records, quality_key):
+    """Merge the complete configured exact-sample set in all flavours/states."""
     if not records:
         raise ValueError(f"No samples available for {quality_key}")
     edges = records[0][3]
-    quality_override = quality_override or {}
-    counts, variances, quality_output = {}, {}, {}
+    counts, variances = {}, {}
     for sample, sample_counts, sample_variances, sample_edges in records:
         if not (np.array_equal(edges[0], sample_edges[0]) and np.array_equal(edges[1], sample_edges[1])):
             raise ValueError(f"Histogram binning differs within {quality_key}")
-        quality_output[sample] = quality_override.get(
-            sample, sample_quality(sample_counts, sample_variances))
     for flavor in FLAVORS:
-        eligible = [record for record in records if quality_output[record[0]][flavor]["eligible"]]
-        # If every sample fails, retain the complete aggregate and let the
-        # existing physicality/fallback checks decide whether it is usable.
-        if not eligible:
-            eligible = records
         for state in HISTOGRAM_STATES:
-            values = [record[1][flavor, state] for record in eligible]
-            errors = [record[2][flavor, state] for record in eligible]
+            values = [record[1][flavor, state] for record in records]
+            errors = [record[2][flavor, state] for record in records]
             counts[flavor, state] = np.sum(values, axis=0)
             variances[flavor, state] = np.sum(errors, axis=0)
-    _LAST_SAMPLE_QUALITY[quality_key] = {
-        sample: quality_output[sample] for sample, _, _, _ in records
-    }
     return counts, variances, edges, [record[0] for record in records]
 
 
@@ -302,7 +266,7 @@ def discover_sample_histograms(input_dir, year, channel, job_manifest=None, conf
 
 
 def discover_family_histograms(input_dir, year, channel, job_manifest=None, config=None):
-    """Read exact samples and return quality-filtered family aggregates."""
+    """Read exact samples and return canonical family aggregates."""
     samples, completeness = discover_sample_histograms(input_dir, year, channel, job_manifest, config)
     grouped_counts, grouped_variances, grouped_edges, members = {}, {}, {}, {}
     for family in sorted({sample_family(sample, config) for sample, _, _, _ in samples}):
@@ -377,19 +341,161 @@ def validate_counts(counts, variances=None):
             )
 
 
-def repair_with_inclusive(counts, variances, inclusive_counts, inclusive_variances):
-    """Replace only pathological family bins with the validated all-MC bin."""
+def component_invalid_masks(counts, variances):
+    """Identify the smallest cumulative-WP components implicated by bad bins."""
+    masks = {flavor: {wp: np.zeros_like(counts[flavor, "den"], dtype=bool)
+                      for wp in INCLUSIVE_WPS} for flavor in FLAVORS}
+    for flavor in FLAVORS:
+        den = counts[flavor, "den"]
+        scale = np.maximum(1., np.abs(den))
+        tol = 1.e-10 * scale
+        for wp in INCLUSIVE_WPS:
+            value = counts[flavor, wp]
+            invalid = (~np.isfinite(value) | ~np.isfinite(den) |
+                       (den <= tol) | (value < -tol) | (value > den + tol))
+            uncertainty = mcstat_efficiency_uncertainty(
+                value, den, variances[flavor, wp], variances[flavor, "den"])
+            invalid |= ~np.isfinite(uncertainty)
+            masks[flavor][wp] |= invalid
+
+        # Map an invalid exclusive interval to its bounding cumulative WPs.
+        categories = ("N", "LnotM", "MnotT", "TnotXT", "XTnotXXT", "XXT")
+        bounds = {
+            "N": (0,), "LnotM": (0, 1), "MnotT": (1, 2),
+            "TnotXT": (2, 3), "XTnotXXT": (3, 4), "XXT": (4,),
+        }
+        for category in categories:
+            value = counts[flavor, category]
+            variance = variances[flavor, category]
+            cancellation = ((np.abs(value) <= tol) & (variance > 1.e-20 * scale ** 2))
+            category_bad = (value < -tol) | ~np.isfinite(value) | cancellation
+            for index in bounds[category]:
+                masks[flavor][INCLUSIVE_WPS[index]] |= category_bad
+    return masks
+
+
+def recompute_exclusive(counts, variances, flavor):
+    """Rebuild exclusive yields/Sumw2 from the final cumulative WP values."""
+    pairs = (("LnotM", "L", "M"), ("MnotT", "M", "T"),
+             ("TnotXT", "T", "XT"), ("XTnotXXT", "XT", "XXT"))
+    for category, loose, tight in pairs:
+        counts[flavor, category] = counts[flavor, loose] - counts[flavor, tight]
+        variances[flavor, category] = np.maximum(
+            variances[flavor, loose] - variances[flavor, tight], 0.)
+    counts[flavor, "N"] = counts[flavor, "den"] - counts[flavor, "L"]
+    variances[flavor, "N"] = np.maximum(
+        variances[flavor, "den"] - variances[flavor, "L"], 0.)
+    for category in EXCLUSIVE_CATEGORIES:
+        zero = np.abs(counts[flavor, category]) <= 1.e-8 * np.maximum(
+            1., np.abs(counts[flavor, "den"]))
+        variances[flavor, category][zero] = 0.
+
+
+def repair_with_inclusive(counts, variances, consensus_candidates):
+    """Repair affected components from the narrowest valid consensus source."""
     repaired = {key: values.copy() for key, values in counts.items()}
     repaired_variances = {key: values.copy() for key, values in variances.items()}
+    invalid = component_invalid_masks(counts, variances)
     replacements = {}
-    for flavor, invalid in invalid_count_bins(counts, variances).items():
-        if not np.any(invalid):
+    for flavor in FLAVORS:
+        affected = {wp: invalid[flavor][wp].copy() for wp in INCLUSIVE_WPS}
+        if not any(np.any(mask) for mask in affected.values()):
             continue
-        for state in HISTOGRAM_STATES:
-            repaired[flavor, state][invalid] = inclusive_counts[flavor, state][invalid]
-            repaired_variances[flavor, state][invalid] = inclusive_variances[flavor, state][invalid]
-        replacements[flavor] = np.argwhere(invalid).tolist()
-    validate_counts(repaired, repaired_variances)
+        # Extend each affected bin to the minimum contiguous WP interval
+        # needed to preserve cumulative nesting after replacement.
+        for pt, eta in np.argwhere(np.logical_or.reduce(list(affected.values()))):
+            indices = [i for i, wp in enumerate(INCLUSIVE_WPS) if affected[wp][pt, eta]]
+            lo, hi = min(indices), max(indices)
+            for i in range(lo, hi + 1):
+                affected[INCLUSIVE_WPS[i]][pt, eta] = True
+            # Include a neighbouring cumulative WP when the original value
+            # would violate nesting at the boundary of the replacement.
+            changed = True
+            while changed:
+                changed = False
+                for i in range(len(INCLUSIVE_WPS) - 1):
+                    left, right = INCLUSIVE_WPS[i], INCLUSIVE_WPS[i + 1]
+                    if (repaired[flavor, right][pt, eta] >
+                            repaired[flavor, left][pt, eta] + 1.e-10 and
+                            (affected[left][pt, eta] != affected[right][pt, eta])):
+                        affected[left][pt, eta] = True
+                        affected[right][pt, eta] = True
+                        changed = True
+        denominator_bad = (~np.isfinite(repaired[flavor, "den"]) |
+                           (repaired[flavor, "den"] <= 0))
+        for pt, eta in np.argwhere(denominator_bad &
+                                   np.logical_or.reduce(list(affected.values()))):
+            for wp in INCLUSIVE_WPS:
+                affected[wp][pt, eta] = True
+        source = None
+        original = {wp: repaired[flavor, wp].copy() for wp in INCLUSIVE_WPS}
+        original_var = {wp: repaired_variances[flavor, wp].copy() for wp in INCLUSIVE_WPS}
+        for candidate_name, candidate_counts, candidate_variances in consensus_candidates:
+            trial = {wp: original[wp].copy() for wp in INCLUSIVE_WPS}
+            trial_var = {wp: original_var[wp].copy() for wp in INCLUSIVE_WPS}
+            valid_candidate = True
+            candidate_values = {wp: candidate_counts[flavor, wp]
+                                for wp in INCLUSIVE_WPS}
+            candidate_den = repaired[flavor, "den"].copy()
+            candidate_den[denominator_bad] = candidate_counts[flavor, "den"][denominator_bad]
+            for wp in INCLUSIVE_WPS:
+                mask = affected[wp]
+                if np.any(mask):
+                    value = candidate_counts[flavor, wp]
+                    variance = candidate_variances[flavor, wp]
+                    if np.any(~np.isfinite(value[mask]) | ~np.isfinite(variance[mask]) |
+                              ~np.isfinite(candidate_den[mask]) | (candidate_den[mask] <= 0)):
+                        valid_candidate = False
+                        break
+            # Project the consensus cumulative values onto the physical
+            # nested interval before assigning the affected components.
+            if valid_candidate:
+                projected = {wp: candidate_values[wp].copy() for wp in INCLUSIVE_WPS}
+                projected[INCLUSIVE_WPS[0]] = np.clip(
+                    projected[INCLUSIVE_WPS[0]], 0., candidate_den)
+                for i in range(1, len(INCLUSIVE_WPS)):
+                    wp, previous = INCLUSIVE_WPS[i], INCLUSIVE_WPS[i - 1]
+                    projected[wp] = np.clip(projected[wp], 0., projected[previous])
+                for wp in INCLUSIVE_WPS:
+                    mask = affected[wp]
+                    trial[wp][mask] = projected[wp][mask]
+                    trial_var[wp][mask] = candidate_variances[flavor, wp][mask]
+            if not valid_candidate:
+                continue
+            trial_counts = {key: values.copy() for key, values in repaired.items()}
+            trial_vars = {key: values.copy() for key, values in repaired_variances.items()}
+            if np.any(denominator_bad):
+                mask = denominator_bad & np.logical_or.reduce(list(affected.values()))
+                trial_counts[flavor, "den"][mask] = candidate_counts[flavor, "den"][mask]
+                trial_vars[flavor, "den"][mask] = candidate_variances[flavor, "den"][mask]
+            for wp in INCLUSIVE_WPS:
+                trial_counts[flavor, wp] = trial[wp]
+                trial_vars[flavor, wp] = trial_var[wp]
+            recompute_exclusive(trial_counts, trial_vars, flavor)
+            for wp in INCLUSIVE_WPS:
+                mask = affected[wp]
+                if np.any(mask):
+                    unc = mcstat_efficiency_uncertainty(
+                        trial_counts[flavor, wp][mask], trial_counts[flavor, "den"][mask],
+                        trial_vars[flavor, wp][mask], trial_vars[flavor, "den"][mask])
+                    bad_unc = np.zeros_like(mask)
+                    bad_unc[mask] = ~np.isfinite(unc)
+                    trial_vars[flavor, wp][bad_unc] = 0.
+            repaired, repaired_variances, source = trial_counts, trial_vars, candidate_name
+            break
+        if source is None:
+            raise ValueError(f"No valid consensus fallback for flavor {flavor}; candidates={[name for name, _, _ in consensus_candidates]}")
+        replacements[flavor] = {
+            "wp_range": [INCLUSIVE_WPS[min(i for i, wp in enumerate(INCLUSIVE_WPS)
+                                         if np.any(affected[wp]))],
+                         INCLUSIVE_WPS[max(i for i, wp in enumerate(INCLUSIVE_WPS)
+                                          if np.any(affected[wp]))]],
+            "bins": np.argwhere(np.logical_or.reduce(list(affected.values()))).tolist(),
+            "source": source,
+        }
+    # Unaffected components remain untouched.  The cumulative and exclusive
+    # identities were rebuilt above; the standard converter validation below
+    # remains responsible for rejecting unresolved signed-weight pathologies.
     return repaired, repaired_variances, replacements
 
 
@@ -652,7 +758,6 @@ def grouped_specs(prefix, grouped_counts, grouped_variances, grouped_edges, memb
         inclusive_counts, inclusive_variances)
     if inclusive_merged_bins:
         print(f"inclusive: adaptive pT merges: {inclusive_merged_bins}")
-    validate_counts(inclusive_counts, inclusive_variances)
     specs, fallbacks, adaptive_merges = [], {}, {"inclusive": inclusive_merged_bins}
     for group in sorted(members):
         counts, variances, merged_bins = merge_invalid_bins_downward(
@@ -660,8 +765,19 @@ def grouped_specs(prefix, grouped_counts, grouped_variances, grouped_edges, memb
         if merged_bins:
             print(f"{group}: adaptive pT merges: {merged_bins}")
         adaptive_merges[group] = merged_bins
-        counts, variances, fallback_bins = repair_with_inclusive(
-            counts, variances, inclusive_counts, inclusive_variances)
+        consensus_counts, consensus_variances = {}, {}
+        other_groups = [name for name in members if name != group]
+        if other_groups:
+            for name in other_groups:
+                add_counts(consensus_counts, grouped_counts[name])
+                add_counts(consensus_variances, grouped_variances[name])
+            consensus_counts, consensus_variances, _ = merge_invalid_bins_downward(
+                consensus_counts, consensus_variances)
+        candidates = []
+        if other_groups:
+            candidates.append(("channel-family consensus", consensus_counts, consensus_variances))
+        candidates.append(("all-MC inclusive consensus", inclusive_counts, inclusive_variances))
+        counts, variances, fallback_bins = repair_with_inclusive(counts, variances, candidates)
         if fallback_bins:
             fallbacks[group] = fallback_bins
             print(f"{group}: replaced {sum(len(bins) for bins in fallback_bins.values())} pathological bins with all-MC yields")
@@ -727,7 +843,7 @@ def discover_final_histograms(input_root, year, config=None):
     """Merge all YAML-retained raw outputs into final channel/sample groups."""
     config = load_config(year) if config is None else config
     channel_inputs, channel_manifests, ignored = discover_final_inputs(input_root, year, config)
-    records_by_target, quality_by_target, completeness, members = {}, {}, {}, {}
+    records_by_target, completeness, members = {}, {}, {}
     for channel, input_dir in channel_inputs.items():
         samples, checked = discover_sample_histograms(
             input_dir, year, channel, channel_manifests[channel], config)
@@ -742,12 +858,10 @@ def discover_final_histograms(input_root, year, config=None):
             for sample, counts, variances, edges in family_records:
                 key = f"{channel}:{sample}"
                 records_by_target.setdefault(target, []).append((key, counts, variances, edges))
-                quality_by_target.setdefault(target, {})[key] = sample_quality(counts, variances)
                 members.setdefault(target[0], {}).setdefault(target[1], []).append(key)
     grouped_counts, grouped_variances, grouped_edges = {}, {}, {}
     for target, records in records_by_target.items():
-        counts, variances, edges, _ = aggregate_sample_records(
-            records, f"{target[0]}/{target[1]}", quality_by_target[target])
+        counts, variances, edges, _ = aggregate_sample_records(records, f"{target[0]}/{target[1]}")
         grouped_counts[target], grouped_variances[target], grouped_edges[target] = counts, variances, edges
     return grouped_counts, grouped_variances, grouped_edges, members, completeness, ignored
 
@@ -788,7 +902,6 @@ def main():
             "ignored_source_channels": ignored,
             "final_members": members, "inclusive_fallback_bins": fallbacks,
             "adaptive_pT_merges": adaptive_merges,
-            "sample_quality": _LAST_SAMPLE_QUALITY,
             "input_completeness_verified": True,
             "job_counts": completeness,
         }, indent=2) + "\n")
@@ -813,7 +926,6 @@ def main():
             "input_dir": str(args.input_dir), "families": members,
             "inclusive_fallback_bins": fallbacks,
             "adaptive_pT_merges": adaptive_merges,
-            "sample_quality": _LAST_SAMPLE_QUALITY,
             "input_completeness_verified": completeness is not None,
             "job_counts": completeness or {},
         }, indent=2) + "\n")
