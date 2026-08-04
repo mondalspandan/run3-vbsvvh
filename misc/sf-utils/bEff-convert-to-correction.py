@@ -454,28 +454,41 @@ def fallback_efficiencies(target, consensus_candidates):
             source = None
             for name, candidate, cc, cv, strict in consensus_candidates:
                 ce, cu = candidate
-                if strict:
+                candidate_lo, candidate_hi = initial_span
+                def candidate_quality(lo_i, hi_i):
+                    if not strict:
+                        return terminal_sequence_valid(ce, cu, cc, flavor, pt, eta)
                     region = {"counts": {state: cc[flavor, state][pt:pt+1, eta:eta+1]
                                           for state in HISTOGRAM_STATES},
                               "variances": {state: cv[flavor, state][pt:pt+1, eta:eta+1]
                                             for state in HISTOGRAM_STATES}}
                     _, _, candidate_mask = region_quality(region, flavor, 1)
-                    required = set(range(lo, hi + 1))
-                    if lo > 0: required.add(lo - 1)
-                    if hi + 1 < len(INCLUSIVE_WPS): required.add(hi + 1)
-                    if any(candidate_mask[i] for i in required): continue
+                    required = set(range(lo_i, hi_i + 1))
+                    if lo_i > 0: required.add(lo_i - 1)
+                    if hi_i + 1 < len(INCLUSIVE_WPS): required.add(hi_i + 1)
+                    if any(candidate_mask[i] for i in required): return False
                     if any(not terminal_component_valid(ce, cu, cc, flavor,
                                                          INCLUSIVE_WPS[i], pt, eta)
                            for i in required):
-                        continue
-                elif not terminal_sequence_valid(ce, cu, cc, flavor, pt, eta):
-                    continue
+                        return False
+                    return True
+                if not candidate_quality(candidate_lo, candidate_hi): continue
                 while True:
                     values = [final_eff[flavor, wp][pt, eta] for wp in INCLUSIVE_WPS]
-                    for i in range(lo, hi + 1): values[i] = ce[flavor, INCLUSIVE_WPS[i]][pt, eta]
-                    if all(values[i] <= values[i-1] for i in range(1, len(values))): break
-                    lo, hi = 0, len(INCLUSIVE_WPS)-1
+                    for i in range(candidate_lo, candidate_hi + 1):
+                        values[i] = ce[flavor, INCLUSIVE_WPS[i]][pt, eta]
+                    violations = [i for i in range(1, len(values))
+                                  if values[i] > values[i-1] + 1.e-12]
+                    if not violations: break
+                    expanded = False
+                    if candidate_lo > 0 and any(i == candidate_lo for i in violations):
+                        candidate_lo -= 1; expanded = True
+                    if candidate_hi + 1 < len(INCLUSIVE_WPS) and any(i == candidate_hi + 1 for i in violations):
+                        candidate_hi += 1; expanded = True
+                    if not expanded or not candidate_quality(candidate_lo, candidate_hi):
+                        break
                 if all(values[i] <= values[i-1] for i in range(1, len(values))):
+                    lo, hi = candidate_lo, candidate_hi
                     for i in range(lo, hi + 1):
                         wp = INCLUSIVE_WPS[i]; final_eff[flavor, wp][pt, eta] = ce[flavor, wp][pt, eta]; final_unc[flavor, wp][pt, eta] = cu[flavor, wp][pt, eta]
                     source = name; break
