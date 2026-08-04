@@ -341,162 +341,106 @@ def validate_counts(counts, variances=None):
             )
 
 
-def component_invalid_masks(counts, variances):
-    """Identify the smallest cumulative-WP components implicated by bad bins."""
-    masks = {flavor: {wp: np.zeros_like(counts[flavor, "den"], dtype=bool)
-                      for wp in INCLUSIVE_WPS} for flavor in FLAVORS}
-    for flavor in FLAVORS:
-        den = counts[flavor, "den"]
-        scale = np.maximum(1., np.abs(den))
-        tol = 1.e-10 * scale
+def region_quality(region, flavor, neta):
+    """Shared complete quality criterion for adaptive and final regions."""
+    c, v, d = region["counts"], region["variances"], region["counts"]["den"]
+    scale = max(1., *(float(np.max(np.abs(c[state]))) for state in HISTOGRAM_STATES))
+    bad, score = False, 0.
+    def violation(amount):
+        nonlocal bad, score
+        if amount > 0.: bad, score = True, score + amount
+    for eta in range(neta):
+        den, var_den = float(d[eta]), float(v["den"][eta])
+        if not np.isfinite(den) or not np.isfinite(var_den) or den <= 1.e-10 * scale or var_den < 0:
+            violation(10.); continue
+        significance = den / np.sqrt(var_den) if var_den > 0 else np.inf
+        neff = den * den / var_den if var_den > 0 else np.inf
+        violation(MIN_DENOMINATOR_SIGNIFICANCE / max(significance, 1.e-12) - 1.)
+        violation(MIN_EFFECTIVE_DENOMINATOR[flavor] / max(neff, 1.e-12) - 1.)
+        inclusive = {wp: float(c[wp][eta]) for wp in INCLUSIVE_WPS}
+        exclusive = {cat: float(c[cat][eta]) for cat in EXCLUSIVE_CATEGORIES}
+        violation(max(0., -exclusive["N"]) / max(scale, 1.))
+        for left, right in zip(INCLUSIVE_WPS[:-1], INCLUSIVE_WPS[1:]):
+            violation(max(0., inclusive[right] - inclusive[left]) / max(scale, 1.))
+        violation(max(0., inclusive["L"] - den) / max(scale, 1.))
+        for parent, category, child in (("L","LnotM","M"),("M","MnotT","T"),
+                                         ("T","TnotXT","XT"),("XT","XTnotXXT","XXT")):
+            violation(abs(inclusive[parent] - exclusive[category] - inclusive[child]) /
+                      max(scale, 1.) - 1.e-10)
+        violation(abs(den - sum(exclusive.values())) / max(scale, 1.) - 1.e-10)
         for wp in INCLUSIVE_WPS:
-            value = counts[flavor, wp]
-            invalid = (~np.isfinite(value) | ~np.isfinite(den) |
-                       (den <= tol) | (value < -tol) | (value > den + tol))
-            uncertainty = mcstat_efficiency_uncertainty(
-                value, den, variances[flavor, wp], variances[flavor, "den"])
-            invalid |= ~np.isfinite(uncertainty)
-            masks[flavor][wp] |= invalid
-
-        # Map an invalid exclusive interval to its bounding cumulative WPs.
-        categories = ("N", "LnotM", "MnotT", "TnotXT", "XTnotXXT", "XXT")
-        bounds = {
-            "N": (0,), "LnotM": (0, 1), "MnotT": (1, 2),
-            "TnotXT": (2, 3), "XTnotXXT": (3, 4), "XXT": (4,),
-        }
-        for category in categories:
-            value = counts[flavor, category]
-            variance = variances[flavor, category]
-            cancellation = ((np.abs(value) <= tol) & (variance > 1.e-20 * scale ** 2))
-            category_bad = (value < -tol) | ~np.isfinite(value) | cancellation
-            for index in bounds[category]:
-                masks[flavor][INCLUSIVE_WPS[index]] |= category_bad
-    return masks
+            unc = float(mcstat_efficiency_uncertainty(np.asarray([inclusive[wp]]), np.asarray([den]),
+                                                       np.asarray([float(v[wp][eta])]), np.asarray([var_den]))[0])
+            violation(10. if not np.isfinite(unc) else unc / MAX_EFFICIENCY_UNCERTAINTY[wp] - 1.)
+        for category in EXCLUSIVE_CATEGORIES:
+            value, variance = exclusive[category], float(v[category][eta])
+            if value < 0.: violation(10.)
+            if value > 1.e-10 * scale and variance > 0:
+                violation(MIN_EFFECTIVE_CATEGORY[flavor] / max(value * value / variance, 1.e-12) - 1.)
+                unc = float(mcstat_efficiency_uncertainty(np.asarray([value]), np.asarray([den]),
+                                                           np.asarray([variance]), np.asarray([var_den]))[0])
+                violation(10. if not np.isfinite(unc) else unc / MAX_CATEGORY_UNCERTAINTY - 1.)
+    return bad, score
 
 
-def recompute_exclusive(counts, variances, flavor):
-    """Rebuild exclusive yields/Sumw2 from the final cumulative WP values."""
-    pairs = (("LnotM", "L", "M"), ("MnotT", "M", "T"),
-             ("TnotXT", "T", "XT"), ("XTnotXXT", "XT", "XXT"))
-    for category, loose, tight in pairs:
-        counts[flavor, category] = counts[flavor, loose] - counts[flavor, tight]
-        variances[flavor, category] = np.maximum(
-            variances[flavor, loose] - variances[flavor, tight], 0.)
-    counts[flavor, "N"] = counts[flavor, "den"] - counts[flavor, "L"]
-    variances[flavor, "N"] = np.maximum(
-        variances[flavor, "den"] - variances[flavor, "L"], 0.)
-    for category in EXCLUSIVE_CATEGORIES:
-        zero = np.abs(counts[flavor, category]) <= 1.e-8 * np.maximum(
-            1., np.abs(counts[flavor, "den"]))
-        variances[flavor, category][zero] = 0.
+def efficiency_maps(counts, variances):
+    eff = {(flavor, wp): efficiency(counts[flavor, wp], counts[flavor, "den"])
+           for flavor in FLAVORS for wp in INCLUSIVE_WPS}
+    unc = {(flavor, wp): mcstat_efficiency_uncertainty(
+        counts[flavor, wp], counts[flavor, "den"], variances[flavor, wp], variances[flavor, "den"])
+           for flavor in FLAVORS for wp in INCLUSIVE_WPS}
+    return eff, unc
 
 
-def repair_with_inclusive(counts, variances, consensus_candidates):
-    """Repair affected components from the narrowest valid consensus source."""
-    repaired = {key: values.copy() for key, values in counts.items()}
-    repaired_variances = {key: values.copy() for key, values in variances.items()}
-    invalid = component_invalid_masks(counts, variances)
-    replacements = {}
+def fallback_efficiencies(target, consensus_candidates):
+    target_eff, target_unc = efficiency_maps(*target)
+    bad = {flavor: np.zeros_like(target_eff[flavor, INCLUSIVE_WPS[0]], dtype=bool) for flavor in FLAVORS}
     for flavor in FLAVORS:
-        affected = {wp: invalid[flavor][wp].copy() for wp in INCLUSIVE_WPS}
-        if not any(np.any(mask) for mask in affected.values()):
-            continue
-        # Extend each affected bin to the minimum contiguous WP interval
-        # needed to preserve cumulative nesting after replacement.
-        for pt, eta in np.argwhere(np.logical_or.reduce(list(affected.values()))):
-            indices = [i for i, wp in enumerate(INCLUSIVE_WPS) if affected[wp][pt, eta]]
-            lo, hi = min(indices), max(indices)
-            for i in range(lo, hi + 1):
-                affected[INCLUSIVE_WPS[i]][pt, eta] = True
-            # Include a neighbouring cumulative WP when the original value
-            # would violate nesting at the boundary of the replacement.
-            changed = True
-            while changed:
-                changed = False
-                for i in range(len(INCLUSIVE_WPS) - 1):
-                    left, right = INCLUSIVE_WPS[i], INCLUSIVE_WPS[i + 1]
-                    if (repaired[flavor, right][pt, eta] >
-                            repaired[flavor, left][pt, eta] + 1.e-10 and
-                            (affected[left][pt, eta] != affected[right][pt, eta])):
-                        affected[left][pt, eta] = True
-                        affected[right][pt, eta] = True
-                        changed = True
-        denominator_bad = (~np.isfinite(repaired[flavor, "den"]) |
-                           (repaired[flavor, "den"] <= 0))
-        for pt, eta in np.argwhere(denominator_bad &
-                                   np.logical_or.reduce(list(affected.values()))):
-            for wp in INCLUSIVE_WPS:
-                affected[wp][pt, eta] = True
-        source = None
-        original = {wp: repaired[flavor, wp].copy() for wp in INCLUSIVE_WPS}
-        original_var = {wp: repaired_variances[flavor, wp].copy() for wp in INCLUSIVE_WPS}
-        for candidate_name, candidate_counts, candidate_variances in consensus_candidates:
-            trial = {wp: original[wp].copy() for wp in INCLUSIVE_WPS}
-            trial_var = {wp: original_var[wp].copy() for wp in INCLUSIVE_WPS}
-            valid_candidate = True
-            candidate_values = {wp: candidate_counts[flavor, wp]
-                                for wp in INCLUSIVE_WPS}
-            candidate_den = repaired[flavor, "den"].copy()
-            candidate_den[denominator_bad] = candidate_counts[flavor, "den"][denominator_bad]
-            for wp in INCLUSIVE_WPS:
-                mask = affected[wp]
-                if np.any(mask):
-                    value = candidate_counts[flavor, wp]
-                    variance = candidate_variances[flavor, wp]
-                    if np.any(~np.isfinite(value[mask]) | ~np.isfinite(variance[mask]) |
-                              ~np.isfinite(candidate_den[mask]) | (candidate_den[mask] <= 0)):
-                        valid_candidate = False
-                        break
-            # Project the consensus cumulative values onto the physical
-            # nested interval before assigning the affected components.
-            if valid_candidate:
-                projected = {wp: candidate_values[wp].copy() for wp in INCLUSIVE_WPS}
-                projected[INCLUSIVE_WPS[0]] = np.clip(
-                    projected[INCLUSIVE_WPS[0]], 0., candidate_den)
-                for i in range(1, len(INCLUSIVE_WPS)):
-                    wp, previous = INCLUSIVE_WPS[i], INCLUSIVE_WPS[i - 1]
-                    projected[wp] = np.clip(projected[wp], 0., projected[previous])
-                for wp in INCLUSIVE_WPS:
-                    mask = affected[wp]
-                    trial[wp][mask] = projected[wp][mask]
-                    trial_var[wp][mask] = candidate_variances[flavor, wp][mask]
-            if not valid_candidate:
-                continue
-            trial_counts = {key: values.copy() for key, values in repaired.items()}
-            trial_vars = {key: values.copy() for key, values in repaired_variances.items()}
-            if np.any(denominator_bad):
-                mask = denominator_bad & np.logical_or.reduce(list(affected.values()))
-                trial_counts[flavor, "den"][mask] = candidate_counts[flavor, "den"][mask]
-                trial_vars[flavor, "den"][mask] = candidate_variances[flavor, "den"][mask]
-            for wp in INCLUSIVE_WPS:
-                trial_counts[flavor, wp] = trial[wp]
-                trial_vars[flavor, wp] = trial_var[wp]
-            recompute_exclusive(trial_counts, trial_vars, flavor)
-            for wp in INCLUSIVE_WPS:
-                mask = affected[wp]
-                if np.any(mask):
-                    unc = mcstat_efficiency_uncertainty(
-                        trial_counts[flavor, wp][mask], trial_counts[flavor, "den"][mask],
-                        trial_vars[flavor, wp][mask], trial_vars[flavor, "den"][mask])
-                    bad_unc = np.zeros_like(mask)
-                    bad_unc[mask] = ~np.isfinite(unc)
-                    trial_vars[flavor, wp][bad_unc] = 0.
-            repaired, repaired_variances, source = trial_counts, trial_vars, candidate_name
-            break
-        if source is None:
-            raise ValueError(f"No valid consensus fallback for flavor {flavor}; candidates={[name for name, _, _ in consensus_candidates]}")
-        replacements[flavor] = {
-            "wp_range": [INCLUSIVE_WPS[min(i for i, wp in enumerate(INCLUSIVE_WPS)
-                                         if np.any(affected[wp]))],
-                         INCLUSIVE_WPS[max(i for i, wp in enumerate(INCLUSIVE_WPS)
-                                          if np.any(affected[wp]))]],
-            "bins": np.argwhere(np.logical_or.reduce(list(affected.values()))).tolist(),
-            "source": source,
-        }
-    # Unaffected components remain untouched.  The cumulative and exclusive
-    # identities were rebuilt above; the standard converter validation below
-    # remains responsible for rejecting unresolved signed-weight pathologies.
-    return repaired, repaired_variances, replacements
+        # Regions that still fail the complete post-merge quality criterion.
+        shape = target_eff[flavor, INCLUSIVE_WPS[0]].shape
+        for pt in range(shape[0]):
+            for eta in range(shape[1]):
+                region = {"counts": {state: target[0][flavor, state][pt:pt+1, eta:eta+1]
+                                      for state in HISTOGRAM_STATES},
+                          "variances": {state: target[1][flavor, state][pt:pt+1, eta:eta+1]
+                                        for state in HISTOGRAM_STATES}}
+                if region_quality(region, flavor, 1)[0]: bad[flavor][pt, eta] = True
+    replacements = []
+    final_eff, final_unc = dict(target_eff), dict(target_unc)
+    for flavor in FLAVORS:
+        for pt, eta in np.argwhere(bad[flavor]):
+            initial = [i for i, wp in enumerate(INCLUSIVE_WPS)
+                       if not np.isfinite(target_eff[flavor, wp][pt, eta]) or
+                       not np.isfinite(target_unc[flavor, wp][pt, eta]) or
+                       target_eff[flavor, wp][pt, eta] < 0 or target_eff[flavor, wp][pt, eta] > 1]
+            if not initial: initial = list(range(len(INCLUSIVE_WPS)))
+            lo, hi = min(initial), max(initial)
+            source = None
+            for name, candidate in consensus_candidates:
+                ce, cu = candidate
+                if any(not np.isfinite(ce[flavor, wp][pt, eta]) or not np.isfinite(cu[flavor, wp][pt, eta])
+                       or ce[flavor, wp][pt, eta] < 0 or ce[flavor, wp][pt, eta] > 1
+                       for wp in INCLUSIVE_WPS): continue
+                while True:
+                    values = [final_eff[flavor, wp][pt, eta] for wp in INCLUSIVE_WPS]
+                    for i in range(lo, hi + 1): values[i] = ce[flavor, INCLUSIVE_WPS[i]][pt, eta]
+                    if all(values[i] <= values[i-1] for i in range(1, len(values))): break
+                    lo, hi = 0, len(INCLUSIVE_WPS)-1
+                if all(values[i] <= values[i-1] for i in range(1, len(values))):
+                    for i in range(lo, hi + 1):
+                        wp = INCLUSIVE_WPS[i]; final_eff[flavor, wp][pt, eta] = ce[flavor, wp][pt, eta]; final_unc[flavor, wp][pt, eta] = cu[flavor, wp][pt, eta]
+                    source = name; break
+            if source is None: raise ValueError(f"No valid efficiency fallback for {flavor} at bin {(int(pt), int(eta))}")
+            replacements.append((flavor, INCLUSIVE_WPS[lo], INCLUSIVE_WPS[hi], [int(pt), int(eta)], source))
+    if any(not np.all(np.isfinite(final_eff[key])) or not np.all(np.isfinite(final_unc[key]))
+           or np.any(final_eff[key] < 0.) or np.any(final_eff[key] > 1.)
+           for key in final_eff):
+        raise ValueError("Final efficiency map contains invalid values")
+    for flavor in FLAVORS:
+        if any(np.any(final_eff[flavor, right] > final_eff[flavor, left] + 1.e-12)
+               for left, right in zip(INCLUSIVE_WPS[:-1], INCLUSIVE_WPS[1:])):
+            raise ValueError(f"Final efficiency map is not nested for {flavor}")
+    return final_eff, final_unc, replacements
 
 
 def merge_invalid_bins_downward(counts, variances):
@@ -525,78 +469,14 @@ def merge_invalid_bins_downward(counts, variances):
                               for state in HISTOGRAM_STATES},
             })
 
-        def quality(region):
-            """Return (is_bad, score) for a candidate pT region."""
-            c = region["counts"]
-            v = region["variances"]
-            d = c["den"]
-            scale = max(1.0, *(float(np.max(np.abs(c[state]))) for state in HISTOGRAM_STATES))
-            tol = 1.e-10 * scale
-            score = 0.0
-            bad = False
-
-            def violation(amount):
-                nonlocal bad, score
-                if amount > 0:
-                    bad = True
-                    score += amount
-
-            for eta in range(neta):
-                den = float(d[eta])
-                var_den = float(v["den"][eta])
-                if not np.isfinite(den) or not np.isfinite(var_den) or den <= tol or var_den < 0:
-                    violation(10.0)
-                    continue
-                significance = den / np.sqrt(var_den) if var_den > 0 else np.inf
-                violation(MIN_DENOMINATOR_SIGNIFICANCE / max(significance, 1.e-12) - 1.)
-                neff = den * den / var_den if var_den > 0 else np.inf
-                violation(MIN_EFFECTIVE_DENOMINATOR[flavor] / max(neff, 1.e-12) - 1.)
-
-                inclusive = {wp: float(c[wp][eta]) for wp in INCLUSIVE_WPS}
-                exclusive = {cat: float(c[cat][eta]) for cat in EXCLUSIVE_CATEGORIES}
-                violation(max(0., -exclusive["N"] / max(tol, 1.e-12)))
-                violation(max(0., -inclusive["XXT"] / max(tol, 1.e-12)))
-                for left, right in (("L", "M"), ("M", "T"), ("T", "XT"), ("XT", "XXT")):
-                    violation(max(0., inclusive[right] - inclusive[left] - tol) / max(scale, 1.))
-                violation(max(0., inclusive["L"] - den - tol) / max(scale, 1.))
-                identities = (
-                    ("L", "LnotM", "M"), ("M", "MnotT", "T"),
-                    ("T", "TnotXT", "XT"), ("XT", "XTnotXXT", "XXT"),
-                )
-                for parent, category, child in identities:
-                    violation(abs(inclusive[parent] - exclusive[category] - inclusive[child]) /
-                              max(scale, 1.) - 1.e-10)
-                violation(abs(den - sum(exclusive.values())) / max(scale, 1.) - 1.e-10)
-
-                for wp in INCLUSIVE_WPS:
-                    unc = float(mcstat_efficiency_uncertainty(
-                        np.asarray([inclusive[wp]]), np.asarray([den]),
-                        np.asarray([v[wp][eta]]), np.asarray([var_den]))[0])
-                    if not np.isfinite(unc):
-                        violation(10.0)
-                    else:
-                        violation(unc / MAX_EFFICIENCY_UNCERTAINTY[wp] - 1.)
-                for category in EXCLUSIVE_CATEGORIES:
-                    value = exclusive[category]
-                    variance = float(v[category][eta])
-                    if value > tol and variance > 0:
-                        category_neff = value * value / variance
-                        violation(MIN_EFFECTIVE_CATEGORY[flavor] / max(category_neff, 1.e-12) - 1.)
-                    unc = float(mcstat_efficiency_uncertainty(
-                        np.asarray([value]), np.asarray([den]),
-                        np.asarray([variance]), np.asarray([var_den]))[0])
-                    if value > tol and (not np.isfinite(unc) or unc > MAX_CATEGORY_UNCERTAINTY):
-                        violation(10.0 if not np.isfinite(unc) else unc / MAX_CATEGORY_UNCERTAINTY - 1.)
-            return bad, score
-
         while True:
-            bad_regions = [i for i, region in enumerate(regions) if quality(region)[0]]
+            bad_regions = [i for i, region in enumerate(regions) if region_quality(region, flavor, neta)[0]]
             if not bad_regions or len(regions) == 1:
                 break
             # Merge the most problematic region first.  Evaluate both
             # neighbours and choose the candidate with the best resulting
             # quality; ties deterministically prefer lower pT.
-            index = max(bad_regions, key=lambda i: quality(regions[i])[1])
+            index = max(bad_regions, key=lambda i: region_quality(regions[i], flavor, neta)[1])
             candidates = []
             for neighbour in (index - 1, index + 1):
                 if 0 <= neighbour < len(regions):
@@ -607,7 +487,7 @@ def merge_invalid_bins_downward(counts, variances):
                         "variances": {state: regions[index]["variances"][state] + regions[neighbour]["variances"][state]
                                       for state in HISTOGRAM_STATES},
                     }
-                    candidates.append((quality(combined), neighbour, combined))
+                    candidates.append((region_quality(combined, flavor, neta), neighbour, combined))
             if not candidates:
                 break
             _, neighbour, combined = min(candidates, key=lambda item: (item[0][0], item[0][1], item[1]))
@@ -775,15 +655,14 @@ def grouped_specs(prefix, grouped_counts, grouped_variances, grouped_edges, memb
                 consensus_counts, consensus_variances)
         candidates = []
         if other_groups:
-            candidates.append(("channel-family consensus", consensus_counts, consensus_variances))
-        candidates.append(("all-MC inclusive consensus", inclusive_counts, inclusive_variances))
-        counts, variances, fallback_bins = repair_with_inclusive(counts, variances, candidates)
+            candidates.append(("channel-family consensus", efficiency_maps(consensus_counts, consensus_variances)))
+        candidates.append(("all-MC inclusive consensus", efficiency_maps(inclusive_counts, inclusive_variances)))
+        target_maps = (counts, variances)
+        efficiency_values, mcstat_uncertainties, fallback_bins = fallback_efficiencies(target_maps, candidates)
         if fallback_bins:
             fallbacks[group] = fallback_bins
-            print(f"{group}: replaced {sum(len(bins) for bins in fallback_bins.values())} pathological bins with all-MC yields")
-        efficiency_values = {(flavor, wp): efficiency(counts[(flavor, wp)], counts[(flavor, "den")])
-                             for flavor in FLAVORS for wp in INCLUSIVE_WPS}
-        mcstat_uncertainties = compute_mcstat_uncertainties(counts, variances)
+            for flavor, lo, hi, bins, source in fallback_bins:
+                print(f"fallback {prefix} {group} {flavor} {lo}-{hi} {bins} {source}")
         specs.extend([
             (prefix, sample_category(group, efficiency_values, grouped_edges[group]),
              "Selected-AK4 UParTAK4 b-tag efficiency", "efficiency", "MC tagging efficiency"),
