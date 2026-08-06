@@ -1535,7 +1535,7 @@ RNode applyMETPhiCorrections(RNode df, bool isData) {
         std::string pt_corr_name = isData ? "pt_metphicorr_puppimet_data" : "pt_metphicorr_puppimet_mc";
         std::string phi_corr_name = isData ? "phi_metphicorr_puppimet_data" : "phi_metphicorr_puppimet_mc";
 
-        // Note the correction json is only defined for up to 6500, so do not pass larger values
+        // Correction json is only defined for up to 6500, so do not pass larger values
         float pt_max = 6499.9;
         float pt_to_pass = std::min(pt,pt_max);
         pt_corr = metCorrections().at(year).at(pt_corr_name)->evaluate({pt_to_pass, phi, static_cast<double>(npvs), static_cast<double>(run)});
@@ -1543,29 +1543,14 @@ RNode applyMETPhiCorrections(RNode df, bool isData) {
         
         return std::make_pair(static_cast<float>(pt_corr), static_cast<float>(phi_corr));
     };
-    // Runs AFTER applyType1MET + applyMETUnclusteredVariations, so it refines the
-    // already-rebuilt MET rather than starting from PuppiMET. Run 3 has no met.json
-    // configured (see metCorrections above) → eval_correction warns once and passes through.
-    //
-    // Applied to the nominal MET *and* to every MET variation (JES, JER, UES). Correcting
-    // only the nominal — the previous behaviour — left a spurious nominal-vs-varied offset
-    // inside every MET shape systematic: the varied columns carried an un-φ-corrected MET
-    // while the nominal did not, so part of each "JES"/"JER"/"UES" shape was in fact the
-    // missing φ correction. No-op on Run 3, a real effect on Run 2 where the JSONs load.
-    //
-    // Variations are presence-checked rather than assumed: they are MC-only and only with
-    // --systs given, so on data or in the default nominal-only mode the loop body never runs.
-    // Deriving the set from the columns the MET path actually defined means there is no
-    // flag to keep in sync — same discipline as activeKinVariations() in selections.cpp.
+    // Runs after applyType1MET + applyMETUnclusteredVariations, so it refines the
+    // already-rebuilt MET rather than starting from PuppiMET. 
+    // TO CHECK IF THIS IS CORRECT
     auto correct_one = [&eval_correction](RNode d, const std::string& sfx) {
         const std::string tail   = sfx.empty() ? std::string{} : "_" + sfx;
         const std::string ptCol  = "met_pt"  + tail;
         const std::string phiCol = "met_phi" + tail;
         const std::string helper = "_MET_phicorr" + tail;
-        // The helper is Defined against the PRE-correction (pt, phi), then the columns are
-        // Redefined from it. RDF's graph is functional, so this is not a cycle: the helper
-        // node resolves ptCol/phiCol at its own position, and each Redefine creates a new
-        // node downstream of it.
         d = d.Define(helper, eval_correction, {"year", ptCol, phiCol, "PV_npvs", "run"});
         return d.Redefine(ptCol,  helper + ".first")
                 .Redefine(phiCol, helper + ".second");
