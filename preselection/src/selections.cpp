@@ -109,6 +109,14 @@ RNode TriggerSelections(RNode df_, std::string trigger_logic_string) {
     return df_.Filter(trigger_condition, "C1: Trigger Selection");
 }
 
+// Same defaulting TriggerSelections does above, but with no Filter: the decision is
+// stored for offline use rather than applied here.
+RNode storeTriggerBranches(RNode df_, const std::vector<std::string> &paths)
+{
+    for (const auto &path : paths) df_ = df_.DefaultValueFor(path, (bool)false);
+    return df_;
+}
+
 
 // Ele selection
 RNode ElectronSelections(RNode df_)
@@ -459,14 +467,6 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut, bool isData)
             return "(nLep_Sel == 0) && (" + fjCountCol + " == 1)";
         });
         df = df.Filter(orPassExpr(df, "0lep_1FJ"), "C2: 0lep_1FJ");
-
-        df = df.DefaultValueFor("Pileup_nTrueInt", (float)-1.f)
-                .Define("met_significance", "PuppiMET_significance")
-                .Define("met_uncorrPt", "PuppiMET_pt")
-                .Define("met_uncorrPhi", "PuppiMET_phi")
-                .Define("pileup_nTrueInt", "Pileup_nTrueInt")
-                .Define("pv_npvsGood", "PV_npvsGood");
-
     }
 
     // 0lep_1FJ_met
@@ -476,6 +476,7 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut, bool isData)
         Cutflow::Add(df, "VBS pair candidate found");
 
         df = TriggerSelections(df,trigger_logic_string_met);
+        df = storeTriggerBranches(df, met_trigger_paths);
         Cutflow::Add(df, "C1: Trigger selection");
 
         // Channel orthogonality selection
@@ -484,6 +485,13 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut, bool isData)
             return "(nLep_Sel == 0) && (" + fjCountCol + " == 1)";
         });
         df = df.Filter(orPassExpr(df, "0lep_1FJ_met"), "C2: 0lep_1FJ");
+
+        df = df.DefaultValueFor("Pileup_nTrueInt", (float)-1.f)
+                .Define("met_significance", "PuppiMET_significance")
+                .Define("met_uncorrPt", "PuppiMET_pt")
+                .Define("met_uncorrPhi", "PuppiMET_phi")
+                .Define("pileup_nTrueInt", "Pileup_nTrueInt")
+                .Define("pv_npvsGood", "PV_npvsGood");
     }
 
     // 0lep_2FJ
@@ -501,13 +509,6 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut, bool isData)
             return "(nLep_Sel == 0) && (" + fjCountCol + " == 2)";
         });
         df = df.Filter(orPassExpr(df, "0lep_2FJ"), "C2: 0lep_2FJ");
-
-        df = df.DefaultValueFor("Pileup_nTrueInt", (float)-1.f)
-                .Define("met_significance", "PuppiMET_significance")
-                .Define("met_uncorrPt", "PuppiMET_pt")
-                .Define("met_uncorrPhi", "PuppiMET_phi")
-                .Define("pileup_nTrueInt", "Pileup_nTrueInt")
-                .Define("pv_npvsGood", "PV_npvsGood");
     }
 
     // 0lep_2FJ_met
@@ -517,6 +518,7 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut, bool isData)
         Cutflow::Add(df, "VBS pair candidate found");
 
         df = TriggerSelections(df,trigger_logic_string_met);
+        df = storeTriggerBranches(df, met_trigger_paths);
         Cutflow::Add(df, "C1: Trigger selection");
 
         // Channel orthogonality selection
@@ -525,6 +527,13 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut, bool isData)
             return "(nLep_Sel == 0) && (" + fjCountCol + " == 2)";
         });
         df = df.Filter(orPassExpr(df, "0lep_2FJ_met"), "C2: 0lep_2FJ");
+
+        df = df.DefaultValueFor("Pileup_nTrueInt", (float)-1.f)
+                .Define("met_significance", "PuppiMET_significance")
+                .Define("met_uncorrPt", "PuppiMET_pt")
+                .Define("met_uncorrPhi", "PuppiMET_phi")
+                .Define("pileup_nTrueInt", "Pileup_nTrueInt")
+                .Define("pv_npvsGood", "PV_npvsGood");
     }
 
     // 0lep_3FJ
