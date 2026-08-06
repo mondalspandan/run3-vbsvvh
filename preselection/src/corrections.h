@@ -128,9 +128,10 @@ RNode applyJetEnergyCorrections(const std::unordered_map<std::string, correction
 // <suffix> = "jes" + column_label + direction, e.g. "jesAbsoluteUp", "jesAbsoluteYearDn".
 RNode applyJESVariations(RNode df);
 
-// When called with false before any analysis, disables all JES/JER variation branches
-// (the suffix accessors below return empty, applyJESVariations becomes a no-op). Use
-// --no_systs to activate nominal-only mode.
+// Enables the JES/JER variation branches; called with false (the default) the suffix
+// accessors below return empty and applyJESVariations is a no-op. Nominal-only is the
+// default because most channels estimate their background from data, so background MC
+// does not need the variations. Pass --systs to store them.
 void setStoreSysts(bool v);
 
 // ---------------------------------------------------------------------------------------

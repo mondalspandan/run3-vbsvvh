@@ -32,7 +32,7 @@ struct MyArgs : public argparse::Args {
     bool &runSPANetInference     = flag("spanet_infer", "Run SPANet inference").set_default(false);
     bool &storeHLT = flag("store_hlt", "Store HLT trigger branches in output").set_default(false);
     bool &cutflow = flag("cutflow", "Print cutflow").set_default(false);
-    bool &no_systs = flag("no_systs", "Skip all JES/JER variation branches (nominal only)").set_default(false);
+    bool &systs = flag("systs", "Store JES/JER variation branches. Off by default: most channels estimate their background from data, so background MC is normally produced nominal-only").set_default(false);
     bool &no_jetveto = flag("no_jetveto", "DEBUG ONLY: compute Jet_vetoMap but do not apply it (no Run 3 event veto, no jet masking). NOT for analysis production").set_default(false);
 };
 
@@ -66,7 +66,8 @@ int main(int argc, char** argv) {
     std::string input_spec = args.spec;
     std::string output_file = args.name;
 
-    setStoreSysts(!args.no_systs);
+    setStoreSysts(args.systs);
+    std::cout << " -> JES/JER variation branches: " << (args.systs ? "STORED (--systs)" : "not stored (nominal only)") << std::endl;
 
     setApplyJetVetoMaps(!args.no_jetveto);
     if (args.no_jetveto) {

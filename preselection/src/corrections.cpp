@@ -1085,7 +1085,7 @@ RNode applyJESVariations(RNode df) {
     return df;
 }
 
-static bool g_storeSysts = true;
+static bool g_storeSysts = false;
 void setStoreSysts(bool v) { g_storeSysts = v; }
 
 // DEBUGGING ONLY — see the warning on setApplyJetVetoMaps in corrections.h.
@@ -1500,7 +1500,7 @@ and to these variations alike, by applyMETPhiCorrections below.
 
 RNode applyMETUnclusteredVariations(RNode df, bool isData) {
     if (isData) return df;                                  // MC-only nuisance
-    if (unclusteredVariationSuffixes().empty()) return df;   // --no_systs
+    if (unclusteredVariationSuffixes().empty()) return df;   // nominal-only (no --systs)
 
     // Hard-fail rather than warn-and-skip. Silently dropping these columns produces output
     // that LOOKS complete but carries no UES template at all, and the omission would only
@@ -1517,7 +1517,7 @@ RNode applyMETUnclusteredVariations(RNode df, bool isData) {
                 + "'. NanoAOD v15 ships the pre-shifted MET under these names; the legacy "
                   "v9/v12 delta branches (MET_MetUnclustEnUpDeltaX/Y) no longer exist and "
                   "the MET_* collection was renamed PFMET_*. Either the input predates v15 "
-                  "or the skim dropped the branches — use --no_systs if a nominal-only "
+                  "or the skim dropped the branches — drop --systs if a nominal-only "
                   "production is really what is wanted.");
     }
 
@@ -1591,7 +1591,7 @@ RNode applyMETPhiCorrections(RNode df, bool isData) {
     // missing φ correction. No-op on Run 3, a real effect on Run 2 where the JSONs load.
     //
     // Variations are presence-checked rather than assumed: they are MC-only and only with
-    // systematics enabled, so on data or under --no_systs the loop body never runs.
+    // --systs given, so on data or in the default nominal-only mode the loop body never runs.
     // Deriving the set from the columns the MET path actually defined means there is no
     // flag to keep in sync — same discipline as activeKinVariations() in selections.cpp.
     auto correct_one = [&eval_correction](RNode d, const std::string& sfx) {

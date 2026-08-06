@@ -26,7 +26,7 @@ inline std::string ak8GoodJetSelectionExpr(const std::string& ptCol) {
 
 // Kinematic-variation suffixes (JES + JER) whose varied jet columns actually exist in
 // this graph. Presence-checked rather than assumed: variations are MC-only (and only
-// with systematics enabled), so on data or with --no_systs this returns empty and the
+// with --systs given), so on data or in the default nominal-only mode this returns empty and the
 // selection stays nominal-only. Deriving the set from the columns the correction path
 // actually defined means there is no flag to keep in sync with that path.
 inline std::vector<std::string> activeKinVariations(RNode df) {
