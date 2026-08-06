@@ -144,6 +144,9 @@ Examples:
                         help="Run SPANet inference (--spanet_infer flag)")
     parser.add_argument("--store_hlt", action="store_true",
                         help="Store HLT trigger branches in output")
+    parser.add_argument("--no_jetveto", action="store_true",
+                        help="DEBUG ONLY: compute Jet_vetoMap but do not apply it. "
+                             "NOT for analysis production (jet veto map study only)")
     parser.add_argument("--account", default=None,
                         help="SLURM account (e.g., avery)")
     parser.add_argument("--qos", default=None,
@@ -215,6 +218,8 @@ def generate_slurm_script(task_dir: Path, job_dir: Path, job_name: str,
         extra_flags += " --spanet_infer"
     if args.store_hlt:
         extra_flags += " --store_hlt"
+    if args.no_jetveto:
+        extra_flags += " --no_jetveto"
 
     # Add optional account and qos lines
     acct_line = f"#SBATCH --account={args.account}\n" if args.account else ""
@@ -268,6 +273,8 @@ def generate_array_sbatch(task_dir: Path, job_entries: List[dict],
         extra_flags += " --spanet_infer"
     if args.store_hlt:
         extra_flags += " --store_hlt"
+    if args.no_jetveto:
+        extra_flags += " --no_jetveto"
 
     # Add optional account and qos lines
     acct_line = f"#SBATCH --account={args.account}\n" if args.account else ""

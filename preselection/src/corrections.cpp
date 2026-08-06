@@ -225,33 +225,71 @@ const CSetMap& metCorrections() {
 }
 
 // --- Jet veto maps ------------------------------------------------------------------
-// Run 2 recommendations: https://cms-jerc.web.cern.ch/Recommendations/#run-2_1
-const CSetMap& jetVetoMaps() {
-    static const CSetMap m = {
-        {"2016preVFP", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run2-2016preVFP-UL-NanoAODv9/latest/jetvetomaps.json.gz")},
-        {"2016postVFP", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run2-2016postVFP-UL-NanoAODv9/latest/jetvetomaps.json.gz")},
-        {"2017", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run2-2017-UL-NanoAODv9/latest/jetvetomaps.json.gz")},
-        {"2018", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run2-2018-UL-NanoAODv9/latest/jetvetomaps.json.gz")},
-        {"2022Re-recoBCD", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run3-22CDSep23-Summer22-NanoAODv12/latest/jetvetomaps.json.gz")},
-        {"2022Re-recoE+PromptFG", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run3-22EFGSep23-Summer22EE-NanoAODv12/latest/jetvetomaps.json.gz")},
-        {"2023PromptC", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run3-23CSep23-Summer23-NanoAODv12/latest/jetvetomaps.json.gz")},
-        {"2023PromptD", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run3-23DSep23-Summer23BPix-NanoAODv12/latest/jetvetomaps.json.gz")},
-        {"2024Prompt", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/Run3-24CDEReprocessingFGHIPrompt-Summer24-NanoAODv15/latest/jetvetomaps.json.gz")}
+/*
+JET VETO MAP ERA TABLE
+----------------------
+Same pinning discipline as the JERC table above: a dated snapshot dir, NOT the
+mutable `latest/` symlink, paired with the tag string that exists inside it.
+correctionlib resolves the tag by name, so file and tag must be bumped together
+in one row; loading `latest/` while hard-coding the tag is what lets the two
+drift apart (a V2 re-publish landing under `latest/` would throw from
+`CorrectionSet::at` inside the event loop).
+
+Each snapshot below is the newest dated dir whose jetvetomaps.json.gz is
+byte-identical to that era's `latest/` as of 2026-07-27, so this pinning is a
+no-op on the payloads — it only removes the exposure to future re-publishes.
+The dirs are the JME veto-map era dirs, which for Run 2 are the NanoAODv9 ones
+(the NanoAODv15 dirs ship byte-identical maps; the veto maps are pure (eta,phi)
+lookups and carry no NanoAOD-version dependence).
+
+The map type we evaluate is 'jetvetomap' — the type the JSONs themselves
+document as "the recommended map for analyses", for both Run 2 and Run 3.
+Application differs by run period, per the JME prescription: Run 3 vetoes the whole EVENT if any jet lands in a veto region, Run 2
+vetoes only the JETS themselves.
+Run 2 recommendations: https://cms-jerc.web.cern.ch/Recommendations/#run-2_1
+*/
+struct EraVetoMap {
+    std::string jmeDir;    // era directory under /cvmfs/cms-griddata.cern.ch/cat/metadata/JME
+    std::string snapshot;  // pinned dated snapshot subdir — NOT the mutable `latest/`
+    std::string tag;       // correction name inside that file
+};
+
+const std::map<std::string, EraVetoMap>& eraVetoMapTable() {
+    static const std::map<std::string, EraVetoMap> table = {
+        //  era                      JME era directory                                        snapshot      tag
+        {"2016preVFP",           {"Run2-2016preVFP-UL-NanoAODv9",                         "2026-06-10", "Summer19UL16_V1"}},
+        {"2016postVFP",          {"Run2-2016postVFP-UL-NanoAODv9",                        "2026-06-10", "Summer19UL16_V1"}},
+        {"2017",                 {"Run2-2017-UL-NanoAODv9",                               "2026-06-10", "Summer19UL17_V1"}},
+        {"2018",                 {"Run2-2018-UL-NanoAODv9",                               "2026-06-10", "Summer19UL18_V1"}},
+        {"2022Re-recoBCD",       {"Run3-22CDSep23-Summer22-NanoAODv12",                   "2026-06-05", "Summer22_23Sep2023_RunCD_V1"}},
+        {"2022Re-recoE+PromptFG",{"Run3-22EFGSep23-Summer22EE-NanoAODv12",                "2026-06-05", "Summer22EE_23Sep2023_RunEFG_V1"}},
+        {"2023PromptC",          {"Run3-23CSep23-Summer23-NanoAODv12",                    "2026-07-15", "Summer23Prompt23_RunC_V1"}},
+        {"2023PromptD",          {"Run3-23DSep23-Summer23BPix-NanoAODv12",                "2026-07-15", "Summer23BPixPrompt23_RunD_V1"}},
+        {"2024Prompt",           {"Run3-24CDEReprocessingFGHIPrompt-Summer24-NanoAODv15", "2026-07-16", "Summer24Prompt24_RunBCDEFGHI_V1"}},
+        {"2025",                 {"Run3-25Prompt-Summer24-NanoAODv15",                    "2026-07-16", "Summer24Prompt25_RunCDEFG_V1"}},
     };
+    return table;
+}
+
+const CSetMap& jetVetoMaps() {
+    static const CSetMap m = [] {
+        CSetMap out;
+        for (const auto& [year, era] : eraVetoMapTable())
+            out.emplace(year, *CorrectionSet::from_file(
+                kJMEBase + era.jmeDir + "/" + era.snapshot + "/jetvetomaps.json.gz"));
+        return out;
+    }();
     return m;
 }
 
-const StrMap jetVetoMap_names = {
-    {"2016preVFP", "Summer19UL16_V1"},
-    {"2016postVFP", "Summer19UL16_V1"},
-    {"2017", "Summer19UL17_V1"},
-    {"2018", "Summer19UL18_V1"},
-    {"2022Re-recoBCD", "Summer22_23Sep2023_RunCD_V1"},
-    {"2022Re-recoE+PromptFG", "Summer22EE_23Sep2023_RunEFG_V1"},
-    {"2023PromptC", "Summer23Prompt23_RunC_V1"},
-    {"2023PromptD", "Summer23BPixPrompt23_RunD_V1"},
-    {"2024Prompt", "Summer24Prompt24_RunBCDEFGHI_V1"}
-};
+const StrMap& jetVetoMap_names() {
+    static const StrMap m = [] {
+        StrMap out;
+        for (const auto& [year, era] : eraVetoMapTable()) out.emplace(year, era.tag);
+        return out;
+    }();
+    return m;
+}
 
 // --- Electron scale & smearing ---------------------------------------------------------
 const CSetMap& electronSSCorrections() {
@@ -270,7 +308,7 @@ const CSetMap& electronSSCorrections() {
 }
 
 // --- JMS/JMR placeholder maps (unwired; template for the future GloParT calibration) ----
-// See the JMS/JMR section in corrections.h and CORRECTIONS.md § 5-6. Identity-valued:
+// See the JMS/JMR section in corrections.h. Identity-valued:
 // JMS shift 0.0 GeV, JMR factor 1.0. σ_rel feeds the unmatched stochastic branch of
 // applyJetMassResolution and is unreachable while the factor is 1.0 — replace both
 // together with the per-era values from the calibration fit.
@@ -1036,6 +1074,11 @@ RNode applyJESVariations(RNode df) {
 static bool g_storeSysts = true;
 void setStoreSysts(bool v) { g_storeSysts = v; }
 
+// DEBUGGING ONLY — see the warning on setApplyJetVetoMaps in corrections.h.
+static bool g_applyJetVetoMaps = true;
+void setApplyJetVetoMaps(bool v) { g_applyJetVetoMaps = v; }
+bool applyJetVetoMapsEnabled() { return g_applyJetVetoMaps; }
+
 std::vector<std::string> jesVariationSuffixes() {
     if (!g_storeSysts) return {};
     std::vector<std::string> out;
@@ -1425,8 +1468,8 @@ RNode HEMCorrection(RNode df, bool isData) {
     auto HEMCorrections = [isData](unsigned int run, unsigned long long event, std::string sample_year, RVec<float> pt, RVec<float> eta, RVec<float> phi, RVec<float> jet_id) {
         RVec<bool> jet_mask;   
         if (sample_year == "2018" && ((isData && run >= 319077) || (!isData && event % 100 < 64))) {
-            jet_mask = (jet_id >= 2 && pt > 15.0); // NanoAOD jetID convention https://twiki.cern.ch/twiki/bin/view/CMSPublic/WorkBookNanoAOD#Jets
-                                                    // should still work for current skimmer, which sets jetId==3 : "pass tight ID, fail tightLepVeto", jetId==7 : "pass tight and tightLepVeto ID"
+            jet_mask = (jet_id >= 2 && pt > 15.0); // v>= 30 skims follow NanoAOD jetID convention https://twiki.cern.ch/twiki/bin/view/CMSPublic/WorkBookNanoAOD#Jets
+                                                    // works also for v < 30 skims, which set jetId==3 : "pass tight ID, fail tightLepVeto", jetId==7 : "pass tight and tightLepVeto ID"
             auto eta_ = eta[jet_mask];
             auto phi_ = phi[jet_mask];
             for (size_t i = 0; i < eta_.size(); i++) {
@@ -1543,39 +1586,76 @@ JET VETO MAPS
 ############################################
 */
 
+/*
+The per-jet gate differs between the two runs, following the JME prescriptions. 
+Both ask for pT > 15 GeV and chEmEF + neEmEF < 0.9; they differ in the jet ID 
+and in the muon-overlap treatment:
+
+  Run 3 : tightLepVeto jet ID.
+  Run 2 : tight jet ID, and jets overlapping a PF muon within dR < 0.2 are
+          exempt from the veto.
+
+The ID cuts are written `>= 6` / `>= 2` rather than `== 6` / `== 2` so that both
+jetId encodings work: v >= 30 skims use the NanoAOD convention 2*tight +
+4*tightLepVeto (values 0/2/6), older skims set 3 = "tight, fails tightLepVeto"
+and 7 = "tight and tightLepVeto".
+*/
 RNode applyJetVetoMaps(RNode df) {
-    auto eval_correction = [] (std::string year, RVec<float> pt, RVec<float> eta, RVec<float> phi, RVec<float> jet_id, RVec<float> jet_nuEmEF, RVec<float> jet_chEmEF) {
+    auto eval_correction = [] (std::string year, bool isRun2, RVec<float> pt, RVec<float> eta, RVec<float> phi, RVec<float> jet_id, RVec<float> jet_nuEmEF, RVec<float> jet_chEmEF, RVec<float> muon_eta, RVec<float> muon_phi, RVec<bool> muon_isPFcand) {
         RVec<bool> jet_veto_map;
-        
+
+        // Hard-fail on an unknown era, matching the JEC/JER behaviour. This used to warn once
+        // and flag nothing, which silently produced un-vetoed output. The trap is real: the
+        // 2022/2023 samples are tagged "2022"/"2023", which match none of the four split era
+        // keys the maps are published under ("2022Re-recoBCD", "2022Re-recoE+PromptFG",
+        // "2023PromptC", "2023PromptD"), so they would run with no veto at all. The maps for
+        // those eras ARE wired in eraVetoMapTable() and ready to use -- what is missing is the
+        // era split in the sample metadata, which must be fixed when the 2022/2023 skims land
+        // (the dataset names carry the era: Run2022C/D -> BCD, Run2022E/F/G -> E+PromptFG,
+        // Run2023C -> PromptC, Run2023D -> PromptD).
         if (jetVetoMaps().find(year) == jetVetoMaps().end()) {
-            static std::unordered_set<std::string> warned_years;
-            if (warned_years.find(year) == warned_years.end()) {
-                std::cout << "Warning: Jet veto map for year " << year << " not found. Setting all jets to not vetoed." << std::endl;
-                warned_years.insert(year);
-            }
-            for (size_t i = 0; i < eta.size(); i++) {
-                jet_veto_map.push_back(false);
-            }
-            return jet_veto_map;
+            std::string known;
+            for (const auto& [k, _] : eraVetoMapTable()) known += (known.empty() ? "" : ", ") + k;
+            throw std::runtime_error(
+                "Jet veto map: no map configured for year '" + year + "'. Known eras: " + known
+                + ". A year that reaches this point would run with NO veto map applied, so it is a "
+                  "hard error rather than a warning. If this is a 2022/2023 sample, re-tag its "
+                  "metadata to the matching split era key (the plain '2022'/'2023' keys are not "
+                  "valid -- the maps are published per run era).");
         }
 
+        const float min_jet_id = isRun2 ? 2.0f : 6.0f;   // tight (Run 2) vs tightLepVeto (Run 3)
+
         for (size_t i = 0; i < eta.size(); i++) {
+            if (!(pt[i] > 15.0 && jet_id[i] >= min_jet_id && (jet_nuEmEF[i] + jet_chEmEF[i]) < 0.9)) {
+                jet_veto_map.push_back(false);
+                continue;
+            }
+            // Run 2 only: the recipe only checks jets that do not overlap a PF muon within dR < 0.2.
+            if (isRun2) {
+                bool overlaps_pf_muon = false;
+                for (size_t j = 0; j < muon_eta.size(); j++) {
+                    if (muon_isPFcand[j] && ROOT::VecOps::DeltaR(eta[i], muon_eta[j], phi[i], muon_phi[j]) < 0.2) {
+                        overlaps_pf_muon = true;
+                        break;
+                    }
+                }
+                if (overlaps_pf_muon) {
+                    jet_veto_map.push_back(false);
+                    continue;
+                }
+            }
             float eta_ = eta[i];
             if (std::abs(eta_) > 5.19) {
                 eta_ = 5.19 * (eta_ > 0 ? 1 : -1);
             }
-            bool is_vetoed = jetVetoMaps().at(year).at(jetVetoMap_names.at(year))->evaluate({"jetvetomap", eta_, phi[i]}) != 0;
-            if (is_vetoed && (pt[i] > 15.0 && jet_id[i] == 6 && (jet_nuEmEF[i] + jet_chEmEF[i]) < 0.9)) {
-                jet_veto_map.push_back(true);
-            } else {
-                jet_veto_map.push_back(false);
-            }
+            jet_veto_map.push_back(jetVetoMaps().at(year).at(jetVetoMap_names().at(year))->evaluate({"jetvetomap", eta_, phi[i]}) != 0);
         }
 
         return jet_veto_map;
     };
-    
-    return df.Define("Jet_vetoMap", eval_correction, {"year", "Jet_pt", "Jet_eta", "Jet_phi", "Jet_jetId", "Jet_neEmEF", "Jet_chEmEF"});
+
+    return df.Define("Jet_vetoMap", eval_correction, {"year", "isRun2", "Jet_pt", "Jet_eta", "Jet_phi", "Jet_jetId", "Jet_neEmEF", "Jet_chEmEF", "Muon_eta", "Muon_phi", "Muon_isPFcand"});
 }
 
 /*
@@ -1755,7 +1835,7 @@ RNode applyMCCorrections(RNode df_) {
     df = applyMETPhiCorrections(df, false);
     // GloParT JMS/JMR would be wired here via applyJetMassScale / applyJetMassResolution
     // once the calibration is derived. FatJet_msoftdrop is intentionally not calibrated
-    // (loose object cut only; GloParT is used in the rest of the analysis) — see CORRECTIONS.md § 5-6.
+    // (loose object cut only; GloParT is used in the rest of the analysis).
     df = HEMCorrection(df, false);
     df = applyElectronScaleAndSmearing(df, false);
     return df;

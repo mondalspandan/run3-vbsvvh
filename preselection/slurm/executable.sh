@@ -26,7 +26,12 @@ RUN_NUMBER=$6
 SAMPLE_NAME=$7
 JOB_IDX=$8
 shift 8
-EXTRA_FLAGS="$@"
+# Keep the extra flags as an ARRAY. Expanding a plain string with "$EXTRA_FLAGS"
+# collapses several flags into one argv token, which runAnalysis' parser
+# silently ignores -- that is how a whole production was once produced without
+# the --no_jetveto / --store_hlt it was submitted with. Use "${EXTRA_FLAGS[@]}"
+# for argv and "${EXTRA_FLAGS[*]}" for the substring tests below.
+EXTRA_FLAGS=("$@")
 
 # Constants
 OUTPUTDIR="output"
@@ -48,7 +53,7 @@ echo "  ANALYSIS=$ANALYSIS"
 echo "  RUN_NUMBER=$RUN_NUMBER"
 echo "  SAMPLE_NAME=$SAMPLE_NAME"
 echo "  JOB_IDX=$JOB_IDX"
-echo "  EXTRA_FLAGS=$EXTRA_FLAGS"
+echo "  EXTRA_FLAGS=${EXTRA_FLAGS[*]}"
 echo "  SLURM_JOB_ID=$SLURM_JOB_ID"
 echo "  HOSTNAME=$(hostname)"
 echo "=========================================="
@@ -178,12 +183,12 @@ ls -la bin/
 echo ""
 echo "=== Running analysis ==="
 
-if [[ "$EXTRA_FLAGS" == *"--spanet_infer"* ]]; then
-    echo "./bin/runAnalysis -b 518 -i config.json -n $OUTPUTFILE --outdir $OUTPUTDIR --ana $ANALYSIS --run_number $RUN_NUMBER $EXTRA_FLAGS"
-    ./bin/runAnalysis -b 518 -i config.json -n $OUTPUTFILE --outdir $OUTPUTDIR --ana $ANALYSIS --run_number $RUN_NUMBER "$EXTRA_FLAGS"
+if [[ "${EXTRA_FLAGS[*]}" == *"--spanet_infer"* ]]; then
+    echo "./bin/runAnalysis -b 518 -i config.json -n $OUTPUTFILE --outdir $OUTPUTDIR --ana $ANALYSIS --run_number $RUN_NUMBER ${EXTRA_FLAGS[*]}"
+    ./bin/runAnalysis -b 518 -i config.json -n $OUTPUTFILE --outdir $OUTPUTDIR --ana $ANALYSIS --run_number $RUN_NUMBER "${EXTRA_FLAGS[@]}"
 else
-    echo "./bin/runAnalysis -j $N_CPUS -i config.json -n $OUTPUTFILE --outdir $OUTPUTDIR --ana $ANALYSIS --run_number $RUN_NUMBER $EXTRA_FLAGS"
-    ./bin/runAnalysis -j $N_CPUS -i config.json -n $OUTPUTFILE --outdir $OUTPUTDIR --ana $ANALYSIS --run_number $RUN_NUMBER "$EXTRA_FLAGS"
+    echo "./bin/runAnalysis -j $N_CPUS -i config.json -n $OUTPUTFILE --outdir $OUTPUTDIR --ana $ANALYSIS --run_number $RUN_NUMBER ${EXTRA_FLAGS[*]}"
+    ./bin/runAnalysis -j $N_CPUS -i config.json -n $OUTPUTFILE --outdir $OUTPUTDIR --ana $ANALYSIS --run_number $RUN_NUMBER "${EXTRA_FLAGS[@]}"
 fi
 
 ANALYSIS_STATUS=$?
@@ -205,7 +210,7 @@ echo ""
 echo "=== Validating output ==="
 
 # Determine output file path
-if [[ "$EXTRA_FLAGS" == *"--spanet_training"* ]]; then
+if [[ "${EXTRA_FLAGS[*]}" == *"--spanet_training"* ]]; then
     OUTPUT_ROOT_FILE="$OUTPUTDIR/${OUTPUTFILE}_spanet_training_data.root"
 else
     OUTPUT_ROOT_FILE="$OUTPUTDIR/$OUTPUTFILE.root"
