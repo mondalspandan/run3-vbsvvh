@@ -63,140 +63,87 @@ To run the preselection, use the compiled binary and provide the input specifica
 
 There are examples in `run_wrapper.sh` for running `run_rdf.py` either locally over single jsons for tests, or for running the full analysis at scale over all skim selections. 
 
-## B-tag efficiency production
+## B-tag efficiency correction
 
-Use the MC-only `--btag-eff` mode to run the normal channel preselection and
-write signed nominal-MC-weighted selected-AK4 jet yields (B/C/light denominator,
-inclusive L/M/T/XT/XXT states, and exclusive N/LnotM/MnotT/TnotXT/XTnotXXT/XXT
-categories).  The all-channel/all-sample batch
-command is shown, commented out, in `run_wrapper.sh`:
+B-tag efficiencies have been derived for all retained analysis channels and all five working points (`L`, `M`, `T`, `XT`, `XXT`) for:
 
-```bash
-# python3 run_rdf.py -p "$PREFIX" -o "$OUT_DIR" -n run3_btag_eff \
-#   -c all -m "$MODE" -r 3 -f 1 --btag-eff --year 2024Prompt
-```
+- `2016preVFP`
+- `2016postVFP`
+- `2017`
+- `2018`
+- `2024Prompt`
 
-The shared configuration is the canonical map
-`corrections/scalefactors/btagging/btag_eff_families.yaml`. It contains the
-common ordered `preliminary_families` rules that define the semantic first-pass
-grouping used by conversion and compatibility plots. Its single `final_merges`
-block defines the sample/channel keys used for every supported era; edit it only
-after inspecting the compatibility plots.
-
-Preliminary conversion writes `btag_eff_<year>_*_prelim.json`; it is diagnostic-only.
-Normal MC processing loads the year-scoped final `btag_eff_<year>.json`, whose correction names
-and sample/channel keys must exactly match the YAML final groups. There is no
-exact-sample or preliminary-family fallback at runtime. The `_met` trigger
-subset channels (`0lep_1FJ_met`, `0lep_2FJ_met`) and `all_events` are excluded
-from final construction and global diagnostics.
-The stored `*_mcstat_unc` efficiency uncertainties are informational diagnostics
-only; they are not consumed by the main analysis. (B-tagging SF variation
-branches are separate and remain part of the analysis weighting.)
-
-Normal MC b-tag SF application is controlled per analysis channel by
-`applybtag.yaml`. Each channel contains an ordered subset of `L, M, T, XT, XXT`,
-for example `1lep_1FJ: [L, T]`; the selected subset determines the nested
-event-reweighting categories. Use `[]` to disable SF application for a channel.
-The `--skip-btag-sf` option overrides an enabled list for one invocation. Disabled
-channels retain the ordinary uncoupled pileup, PS, muF, and muR variations.
-
-HF calibration SFs are written as `{central,up,down}` vectors.  The canonical
-year-decorrelated branches are `weight_btagging_sf_HF_uncorrelated_<year>` and
-`weight_btagging_sf_HF_statistic_<year>`; the other source branches use
-`weight_btagging_sf_HF_<source>`.  Run 2 provides `statistic`, `pileup`,
-`isrdef`, `fsrdef`, `muf`, `mur`, `pdf`, `as`, and `ttbar`; 2024 provides
-`statistic`, `pileup`, `isrdef`, `fsrdef`, `muf`, `mur`, `pdfas`, `type3`,
-`bfragmentation`, `topmass`, and `hdamp`.  JES and JER are coupled to the
-corresponding kinematic variations through `weightsyst_jes` and
-`weightsyst_jer`; they are not published as independent b-tag branches.
-Unavailable source
-vectors are central/central/central.  `weight_pileup`, `weight_PSISR`,
-`weight_PSFSR`, `weight_muF`, and `weight_muR` already include their matching
-HF source.  There are no public `*_raw` columns or separate public HF
-pileup/isrdef/fsrdef/muf/mur branches.  The broad HF correlated branch is
-retained only for compatibility/closure and must not be combined with the
-fine-source decomposition in a statistical model; uncorrelated and statistic
-are intentionally both retained.
+The final year-scoped payloads are `corrections/scalefactors/btagging/btag_eff_<year>.json`. The `_met` trigger subsets and `all_events` are intentionally excluded from the payload construction. The stored `*_mcstat_unc` values are diagnostic only and are not consumed by the analysis.
 
 <details>
-<summary>Full b-tag efficiency derivation tutorial</summary>
+<summary>Derivation instructions and tutorial</summary>
+
+The canonical grouping and final channel/sample merges are defined in `corrections/scalefactors/btagging/btag_eff_families.yaml`. The MC-only `--btag-eff` mode writes signed weighted ROOT histograms; use a new output root for each submission.
 
 ```bash
-# 1. Produce raw weighted yields on MC with Slurm.  This directly creates
+# 1. Produce raw weighted yields on MC with Slurm. This creates
 #    $OUT_DIR/2024Prompt/<channel>/{manifest.json,<exact-sample>/output_<job-index>.root}.
-#    Use a new/empty $OUT_DIR for each submission; mixed reruns are rejected.
 python3 run_rdf.py -p "$PREFIX" -o "$OUT_DIR" -n run3_btag_eff \
   -c all -m slurm -r 3 -f 1 --btag-eff --year 2024Prompt
 
-# The later commands consume the year root directly.  Every configured
-# sample, including a no-file skip, is recorded in each manifest; final steps
-# reject incomplete manifests and validate every expected job exactly once.
 INPUT_ROOT="$OUT_DIR/2024Prompt"
 
-# 2. Produce preliminary payloads, once per retained channel.  The ROOT dump
-#    directory and metadata year are explicit; the output name is automatic:
-#    corrections/scalefactors/btagging/btag_eff_2024Prompt_1lep_1FJ_prelim.json
+# 2. Build preliminary payloads and inspect family/channel compatibility.
 python3 ../misc/sf-utils/bEff-convert-to-correction.py \
   --input-dir "$INPUT_ROOT/1lep_1FJ" --job-manifest "$INPUT_ROOT/1lep_1FJ/manifest.json" \
   --year 2024Prompt --channel 1lep_1FJ
-
-# 3. Inspect preliminary compatibility.  The first command compares families
-#    within one source channel; the next two compare retained source channels
-#    before final YAML channel merges.  all_events and the _met subsets are excluded.
 python3 ../misc/sf-utils/plot-btag-eff-families.py \
   --input-dir "$INPUT_ROOT/1lep_1FJ" --job-manifest "$INPUT_ROOT/1lep_1FJ/manifest.json" \
   --year 2024Prompt --channel 1lep_1FJ
-# Manually update final_merges in the selected era YAML after this review.
-# defaults to diagnostics/diagnostic_2024Prompt_prelim_all_channels_families
+# Review the plots, then update final_merges in the YAML if needed.
 python3 ../misc/sf-utils/plot-btag-eff-global.py --skip-matrices \
   --mode families --input-root "$INPUT_ROOT" --year 2024Prompt
-# defaults to diagnostics/diagnostic_2024Prompt_prelim_all_samples_channels
 python3 ../misc/sf-utils/plot-btag-eff-global.py --skip-matrices \
   --mode channels --input-root "$INPUT_ROOT" --year 2024Prompt
 
-# 4. Build the final payload.  All retained YAML channels are discovered
-# automatically; missing channels, manifests, jobs, duplicate outputs, or
-# unexpected samples are fatal.  The excluded _met subset channels are ignored.
+# 3. Build the final payload; channels and manifests are discovered from YAML.
 python3 ../misc/sf-utils/bEff-convert-to-correction.py --final --year 2024Prompt \
   --input-root "$INPUT_ROOT"
 
-# 5. Recheck the two money plots after applying final sample/channel merges.
-# defaults to diagnostics/diagnostic_2024Prompt_final_all_channels_families
+# 4. Recheck the two final compatibility plots.
 python3 ../misc/sf-utils/plot-btag-eff-global.py --final --skip-matrices \
   --mode families --input-root "$INPUT_ROOT" --year 2024Prompt
 python3 ../misc/sf-utils/plot-btag-eff-global.py --final --skip-matrices \
   --mode channels --input-root "$INPUT_ROOT" --year 2024Prompt
-
-# Optional: compare the all-channel/all-sample weighted efficiencies between
-# every complete era layout discovered under the common output directory.
-python3 ../misc/sf-utils/plot-btag-eff-years.py \
-  --input-base /path/to/preselection/slurm/outputs
-
-# The final conversion writes btag_eff_2024Prompt.json.  The analysis selects
-# this file from each sample's metadata year; keep the year suffix.
 ```
 
-The event reweighting uses the ordered adjacent-WP formula: XXT jets use
-SF_XXT; a jet passing WP i but failing the next tighter WP uses
-`(SF_i*eps_i - SF_(i+1)*eps_(i+1))/(eps_i-eps_(i+1))`; jets failing L use
-`(1-SF_L*eps_L)/(1-eps_L)`.  Systematic sources evaluate all five WPs
-coherently, with the existing public nuisance-branch count and central/up/down
-ordering unchanged. Compatibility uses the six mutually exclusive categories
-N/LnotM/MnotT/TnotXT/XTnotXXT/XXT and weighted-binomial MC-statistical
-uncertainties; it is a diagnostic, not a formal hypothesis test. New raw
-schema-v2 outputs must be produced before final payloads can contain M, XT, and
-XXT; old L/T-only ROOT files are rejected by the converter.
-During conversion, a pathological signed-weight pT bin is merged with its
-immediately lower neighbor and the merged efficiency is assigned to both bins;
-an irreparable first-bin pathology still uses the validated all-MC fallback.
-The converter sums the four producer eta bins into one central-jet payload bin;
-its edges are `[-2.4, 2.4]` for 2016 pre/post-VFP and `[-2.5, 2.5]` otherwise.
-pT binning is unchanged.
-The 2016 pre/post-VFP UParTAK4 fixed-WP payloads use |eta| < 2.4; 2017,
-2018, and 2024Prompt use |eta| < 2.5.  Efficiency production and SF
-application use the same year-dependent boundary.
+The converter requires complete manifests and schema-v2 raw outputs. It uses the adjacent-WP event-reweighting formula and rejects old L/T-only ROOT files. During conversion, a pathological signed-weight pT bin is merged with its immediately lower neighbor and the merged efficiency is assigned to both bins; an irreparable first-bin pathology still uses the validated all-MC fallback. The converter sums the four producer eta bins into one central-jet payload bin; its edges are `[-2.4, 2.4]` for 2016 pre/post-VFP and `[-2.5, 2.5]` otherwise. pT binning is unchanged. The 2016 pre/post-VFP UParTAK4 fixed-WP payloads use |eta| < 2.4; 2017, 2018, and 2024Prompt use |eta| < 2.5. Efficiency production and SF application use the same year-dependent boundary.
 
 </details>
+
+## B-tagging SF application
+
+Edit `applybtag.yaml` to choose the ordered WPs needed by each channel, for example `4lep: [L, T]`. The runtime evaluates only the configured WPs and automatically excludes the others. Use `[]` or `--skip-btag-sf` to disable SF application for a channel/invocation. When SFs are disabled, the `*_withbSF`, `weightsyst_jes`, and `weightsyst_jer` branches are not written.
+
+The nominal `weight` already contains the central HF and LF b-tag factors, which are also available independently as `weight_btagging_sf_HF_uncorrelated_<year>[0]` and `weight_btagging_sf_LF_uncorrelated_<year>[0]`. To remove only the nominal b-tag correction for a diagnostic or post-processing comparison, use
+
+```text
+weight_without_btag = weight /
+  (weight_btagging_sf_HF_uncorrelated_<year>[0] *
+   weight_btagging_sf_LF_uncorrelated_<year>[0])
+```
+
+This retains the other corrections in `weight`. `baseweight` is instead before all lepton, b-tag, and other corrections, while the internal `_weight_*_raw` columns are not snapshotted.
+
+Systematic branches are `{central, up, down}` vectors. Recommended branches to use in your postprocessor:
+
+- **Simplified (where AK4 b-tag systematics are expected to be sub-dominant):**
+  - HF: `weight_btagging_sf_HF_correlated`, `weight_btagging_sf_HF_uncorrelated_<year>`
+  - LF: `weight_btagging_sf_LF_correlated`, `weight_btagging_sf_LF_uncorrelated_<year>`
+  - Other SFs: `weight_pileup`, `weight_PSISR`, `weight_PSFSR`, `weight_muF`, and `weight_muR`
+  - With JES variation responses: simply use nominal event weight `weight`
+
+- **Full breakdown (where AK4 b-tag systematics are found to be dominant):**
+  - HF: `weight_btagging_sf_HF_pdf`, `weight_btagging_sf_HF_as`, `weight_btagging_sf_HF_pdfas`, `weight_btagging_sf_HF_ttbar`, `weight_btagging_sf_HF_type3`, `weight_btagging_sf_HF_bfragmentation`, `weight_btagging_sf_HF_topmass`, `weight_btagging_sf_HF_hdamp`, and `weight_btagging_sf_HF_statistic_<year>`
+  - LF: `weight_btagging_sf_LF_correlated`, `weight_btagging_sf_LF_uncorrelated_<year>`
+  - Other SFs: `weight_pileup_withbSF`, `weight_PSISR_withbSF`, `weight_PSFSR_withbSF`, `weight_muF_withbSF`, and `weight_muR_withbSF`
+  - With JES variation responses: `weightsyst_jes`, `weightsyst_jer`
+
 
 ---
 ## Details on the condor batch submission

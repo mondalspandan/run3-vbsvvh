@@ -1022,29 +1022,29 @@ RNode applyMCWeights(RNode df_, const std::string &channel, const std::string &s
         df = df.Define("_weight_muR_raw", [] () { return RVec<float>{1.f, 1.f, 1.f}; }, {});
     }
 
+    // Preserve the original analysis variations untouched.  The optional
+    // *_withbSF branches carry the corresponding b-tag response separately.
+    df = df.Define("weight_pileup", [](const RVec<double> &weight) { return weight; }, {"_weight_pileup_raw"})
+           .Define("weight_PSISR", [](const RVec<float> &weight) { return weight; }, {"_weight_PSISR_raw"})
+           .Define("weight_PSFSR", [](const RVec<float> &weight) { return weight; }, {"_weight_PSFSR_raw"})
+           .Define("weight_muF", [](const RVec<float> &weight) { return weight; }, {"_weight_muF_raw"})
+           .Define("weight_muR", [](const RVec<float> &weight) { return weight; }, {"_weight_muR_raw"});
     if (apply_btag_sf) {
-        // The nominal event weight already contains the central HF b-tag factor.
-        // Couple matching analysis variations to the corresponding HF source once.
-        df = df.Define("weight_pileup", correlateWeightWithBTagSource<double>,
+        df = df.Define("weight_pileup_withbSF", correlateWeightWithBTagSource<double>,
                        {"_weight_pileup_raw", bTagHFInternalBranchName("pileup")})
-               .Define("weight_PSISR", correlateWeightWithBTagSource<float>,
+               .Define("weight_PSISR_withbSF", correlateWeightWithBTagSource<float>,
                        {"_weight_PSISR_raw", bTagHFInternalBranchName("isrdef")})
-               .Define("weight_PSFSR", correlateWeightWithBTagSource<float>,
+               .Define("weight_PSFSR_withbSF", correlateWeightWithBTagSource<float>,
                        {"_weight_PSFSR_raw", bTagHFInternalBranchName("fsrdef")})
-               .Define("weight_muF", correlateWeightWithBTagSource<float>,
+               .Define("weight_muF_withbSF", correlateWeightWithBTagSource<float>,
                        {"_weight_muF_raw", bTagHFInternalBranchName("muf")})
-               .Define("weight_muR", correlateWeightWithBTagSource<float>,
+               .Define("weight_muR_withbSF", correlateWeightWithBTagSource<float>,
                        {"_weight_muR_raw", bTagHFInternalBranchName("mur")});
-    } else {
-        df = df.Define("weight_pileup", [](const RVec<double> &weight) { return weight; }, {"_weight_pileup_raw"})
-               .Define("weight_PSISR", [](const RVec<float> &weight) { return weight; }, {"_weight_PSISR_raw"})
-               .Define("weight_PSFSR", [](const RVec<float> &weight) { return weight; }, {"_weight_PSFSR_raw"})
-               .Define("weight_muF", [](const RVec<float> &weight) { return weight; }, {"_weight_muF_raw"})
-               .Define("weight_muR", [](const RVec<float> &weight) { return weight; }, {"_weight_muR_raw"});
     }
 
-    // Keep the upstream `weightsyst_*` naming while retaining the local
-    // b-tag-coupled `weight_*` aliases used by existing consumers.
+    // Keep the upstream `weightsyst_*` naming on the untouched analysis
+    // variations.  Consumers that want b-tag-correlated variations should use
+    // the explicit *_withbSF branches above.
     df = df.Define("weightsyst_pileup", [](const RVec<double> &weight) { return weight; }, {"weight_pileup"})
            .Define("weightsyst_PSISR", [](const RVec<float> &weight) { return weight; }, {"weight_PSISR"})
            .Define("weightsyst_PSFSR", [](const RVec<float> &weight) { return weight; }, {"weight_PSFSR"})
@@ -1059,9 +1059,6 @@ RNode applyMCWeights(RNode df_, const std::string &channel, const std::string &s
                        {bTagHFInternalBranchName("jes")})
                .Define("weightsyst_jer", bTagKinematicVariationRatios,
                        {bTagHFInternalBranchName("jer")});
-    } else {
-        df = df.Define("weightsyst_jes", [] () { return RVec<double>{1., 1., 1.}; }, {})
-               .Define("weightsyst_jer", [] () { return RVec<double>{1., 1., 1.}; }, {});
     }
 
     std::string nominal_weight = std::string("weight *") +
