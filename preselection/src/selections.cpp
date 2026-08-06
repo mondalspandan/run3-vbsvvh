@@ -109,7 +109,7 @@ RNode TriggerSelections(RNode df_, std::string trigger_logic_string) {
     return df_.Filter(trigger_condition, "C1: Trigger Selection");
 }
 
-// Same defaulting TriggerSelections does above, but with no Filter: the decision is
+// Same defaulting TriggerSelections does, but with no Filter: the decision is
 // stored for offline use rather than applied here.
 RNode storeTriggerBranches(RNode df_, const std::vector<std::string> &paths)
 {
@@ -476,6 +476,14 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut, bool isData)
         Cutflow::Add(df, "VBS pair candidate found");
 
         df = TriggerSelections(df,trigger_logic_string_met);
+        // The trigger choice is currently applied offline instead. 
+        // These are the triggers whose decisions are written out.
+        const std::vector<std::string> met_trigger_paths = {
+            "HLT_PFMETNoMu120_PFMHTNoMu120_IDTight",
+            "HLT_PFMETNoMu110_PFMHTNoMu110_IDTight",
+            "HLT_PFMETNoMu140_PFMHTNoMu140_IDTight",
+            "HLT_PFMETNoMu120_PFMHTNoMu120_IDTight_PFHT60",
+        };
         df = storeTriggerBranches(df, met_trigger_paths);
         Cutflow::Add(df, "C1: Trigger selection");
 
@@ -518,6 +526,14 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut, bool isData)
         Cutflow::Add(df, "VBS pair candidate found");
 
         df = TriggerSelections(df,trigger_logic_string_met);
+        // The trigger choice is currently applied offline instead. 
+        // These are the triggers whose decisions are written out.
+        const std::vector<std::string> met_trigger_paths = {
+            "HLT_PFMETNoMu120_PFMHTNoMu120_IDTight",
+            "HLT_PFMETNoMu110_PFMHTNoMu110_IDTight",
+            "HLT_PFMETNoMu140_PFMHTNoMu140_IDTight",
+            "HLT_PFMETNoMu120_PFMHTNoMu120_IDTight_PFHT60",
+        };
         df = storeTriggerBranches(df, met_trigger_paths);
         Cutflow::Add(df, "C1: Trigger selection");
 
