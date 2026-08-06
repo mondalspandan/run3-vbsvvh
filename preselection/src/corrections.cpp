@@ -1060,11 +1060,8 @@ static const std::vector<JESSourceSpec> kJESRegroupedSources = {
 };
 static const std::array<const char*, 2> kJESDirections = {"Up", "Dn"};
 
-// MET unclustered energy (UES) variation table: our column suffix ↔ the NanoAOD branch
-// token. The two deliberately differ. Ours follows this framework's Up/Dn convention and
-// carries a "metuncl" prefix so a MET-ONLY variation can never be mistaken for a
-// jet-level one — there are no Jet_pt_metuncl* / FatJet_pt_metuncl* columns, by design
-// (see unclusteredVariationSuffixes in corrections.h).
+// MET unclustered energy (UES) variation table, pairing the NanoAOD branch and our 
+// output suffix that follows this framework's Up/Dn convention.
 struct UESVariationSpec {
     const char* suffix;     // our column suffix, e.g. "metunclUp" → met_pt_metunclUp
     const char* nanoToken;  // NanoAOD branch token, e.g. "UnclusteredUp" → PuppiMET_ptUnclusteredUp
@@ -1456,69 +1453,35 @@ RNode applyType1MET(RNode df, bool isData) {
 MET UNCLUSTERED ENERGY (UES) VARIATIONS
 ############################################
 
-MET = -Σ p⃗_T over ALL PF candidates, and for systematics that sum splits into two DISJOINT
-pieces. The CLUSTERED part — the candidates inside the >15 GeV, low-EM-fraction AK4 jets
-that enter the Type-1 correction above — carries JES/JER, already propagated by
-applyType1MET. The UNCLUSTERED remainder (soft candidates, sub-threshold jets, pileup
-remnants, HF deposits) has a scale uncertainty of its own, computed in CMSSW by
-pat::MET::shiftedP4(UnclusteredEnUp/Down): each PF-candidate category is varied by its own
-uncertainty (charged hadrons 1%, neutral hadrons 10%, photons 1%, HF hadronic 20%, HF EM
-20%) and the categories are summed in quadrature. CMSSW explicitly EXCLUDES candidates
-already inside a Type-1 jet, so UES does NOT double-count JES. Three consequences, because
-they are easy to get wrong:
-  - under a JES or JER variation, the unclustered part stays nominal;
-  - under a UES variation, the jets stay nominal;
-  - the shifts are NEVER combined. One variation at a time, each its own fit nuisance.
+MET = -Σ p⃗_T over all PF candidates, and for systematics that sum splits into two disjoint
+pieces. The clustered part carries JES/JER, already propagated by
+applyType1MET. The unclustered remainder has a scale uncertainty of its own, computed in CMSSW by
+pat::MET::shiftedP4(UnclusteredEnUp/Down). 
 
 Being disjoint from the jet sum also makes the shift JEC-invariant, which is what lets it
-be lifted from NanoAOD as a VECTOR and added to OUR rebuilt Type-1 MET. The nano
-pre-shifted MET cannot be used directly as the varied MET: it is built on NANO's JEC, so
-using it would silently revert this framework's jet calibration inside the UES templates
-only. Taking the difference is what cancels nano's JEC:
+be lifted from NanoAOD as a vector and added to our rebuilt Type-1 MET.
+Taking the difference is what cancels nano's JEC:
 
   dx± = PuppiMET_ptUnclustered±·cos(PuppiMET_phiUnclustered±) - PuppiMET_pt·cos(PuppiMET_phi)
   dy± = PuppiMET_ptUnclustered±·sin(PuppiMET_phiUnclustered±) - PuppiMET_pt·sin(PuppiMET_phi)
   px± = met_pt·cos(met_phi) + dx±,    py± = met_pt·sin(met_phi) + dy±
 
-BOTH directions are read from the file. The "Down = -Up" trick was forced by the legacy
-NanoAOD format, which stored only the +1σ delta (MET_MetUnclustEnUpDeltaX/Y — gone in v15,
-where the MET_* collection was renamed PFMET_*). Measured on a v15 Run 2 skim,
-|d⃗_up + d⃗_dn| has a mean of 0.06 GeV against a typical |d⃗| of 1.4 GeV: close to
-antisymmetric, but not exactly.
-
-Precision note, so it is not rediscovered as a bug: nano stores PuppiMET_phi with ~12
-mantissa bits and the Unclustered pt with ~10, so the differences above carry ~0.05 GeV of
-rounding per component — a few percent of a typical 1.4 GeV shift, and unbiased. That is
-intrinsic to the delta-extraction recipe (coffea's CorrectedMETFactory path shares it);
-NanoAOD offers nothing more precise.
-
-Runs AFTER applyType1MET and BEFORE applyMETPhiCorrections, so met_pt/met_phi here are the
-pre-φ-corrected Type-1 rebuild — the consistent baseline, since the nano delta is itself
-defined relative to an un-φ-corrected MET. The φ correction is then applied to the nominal
-and to these variations alike, by applyMETPhiCorrections below.
+Runs after applyType1MET and before applyMETPhiCorrections, so met_pt/met_phi here are the
+pre-φ-corrected Type-1 rebuild. 
 */
 
 RNode applyMETUnclusteredVariations(RNode df, bool isData) {
     if (isData) return df;                                  // MC-only nuisance
     if (unclusteredVariationSuffixes().empty()) return df;   // nominal-only (no --systs)
 
-    // Hard-fail rather than warn-and-skip. Silently dropping these columns produces output
-    // that LOOKS complete but carries no UES template at all, and the omission would only
-    // surface at datacard time — the same failure mode the jet veto map era check below was
-    // written to remove. Every Run 2 (RunIISummer20UL*NanoAODv15 re-nano) and Run 3 input
-    // in etc/input_sample_jsons was checked and carries these branches, so a file without
-    // them is a genuine input-version error, not a supported configuration.
     for (const char* b : {"PuppiMET_pt", "PuppiMET_phi",
                           "PuppiMET_ptUnclusteredUp",   "PuppiMET_phiUnclusteredUp",
                           "PuppiMET_ptUnclusteredDown", "PuppiMET_phiUnclusteredDown"}) {
         if (!df.HasColumn(b))
             throw std::runtime_error(
                 std::string("MET unclustered (UES): input is missing branch '") + b
-                + "'. NanoAOD v15 ships the pre-shifted MET under these names; the legacy "
-                  "v9/v12 delta branches (MET_MetUnclustEnUpDeltaX/Y) no longer exist and "
-                  "the MET_* collection was renamed PFMET_*. Either the input predates v15 "
-                  "or the skim dropped the branches — drop --systs if a nominal-only "
-                  "production is really what is wanted.");
+                + "'. Either the input predates v15 or the skim dropped the branches. "
+                  "Drop --systs if a nominal-only production is really what is wanted.");
     }
 
     // One lambda for both directions: the nano direction is carried by the input column
