@@ -18,7 +18,7 @@ RNode MuonSelections(RNode df);
 RNode AK8JetsSelection(RNode df);
 RNode AK4JetsSelection(RNode df);
 
-RNode runPreselection(RNode df_, std::string channel, bool noCut);
+RNode runPreselection(RNode df_, std::string channel, bool noCut, bool isData);
 
 RNode METFilters(RNode df_);
 

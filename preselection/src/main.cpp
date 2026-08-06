@@ -36,11 +36,11 @@ struct MyArgs : public argparse::Args {
     bool &no_jetveto = flag("no_jetveto", "DEBUG ONLY: compute Jet_vetoMap but do not apply it (no Run 3 event veto, no jet masking). NOT for analysis production").set_default(false);
 };
 
-RNode runAnalysis(RNode df, std::string ana, std::string run_number, bool isSignal, SPANet::SPANetInference *spanet_inference, SPANetRun2::SPANetInference *spanet_inference_run2, bool runSPANetInference = false, bool makeSpanetTrainingdata = false)
+RNode runAnalysis(RNode df, std::string ana, std::string run_number, bool isSignal, bool isData, SPANet::SPANetInference *spanet_inference, SPANetRun2::SPANetInference *spanet_inference_run2, bool runSPANetInference = false, bool makeSpanetTrainingdata = false)
 {
     std::cout << " -> Run " << ana << "::runAnalysis()" << std::endl;
 
-    df = runPreselection(df, ana, makeSpanetTrainingdata);
+    df = runPreselection(df, ana, makeSpanetTrainingdata, isData);
     
     if (isSignal) {
         df = GenSelections(df);
@@ -202,13 +202,13 @@ int main(int argc, char** argv) {
     if (isData) {
         std::cout << " -> Running data analysis" << std::endl;
         df = applyDataCorrections(df);
-        df = runAnalysis(df, args.ana, args.run_number, isSignal, spanet_inference.get(), spanet_inference_run2.get(), args.runSPANetInference);
+        df = runAnalysis(df, args.ana, args.run_number, isSignal, isData, spanet_inference.get(), spanet_inference_run2.get(), args.runSPANetInference);
         df = applyDataWeights(df);
         //df = removeDuplicates(df);
     } else {
         std::cout << " -> Running MC analysis" << std::endl;
         df = applyMCCorrections(df);
-        df = runAnalysis(df, args.ana, args.run_number, isSignal, spanet_inference.get(), spanet_inference_run2.get(), args.runSPANetInference, makeSpanetTrainingdata);
+        df = runAnalysis(df, args.ana, args.run_number, isSignal, isData, spanet_inference.get(), spanet_inference_run2.get(), args.runSPANetInference, makeSpanetTrainingdata);
         df = applyMCWeights(df);
     }
 
