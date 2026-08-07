@@ -39,6 +39,7 @@ struct MyArgs : public argparse::Args {
     bool &makeBTagEfficiencies = flag("btag_eff", "Write selected-AK4 b-tag efficiency histograms (MC only)").set_default(false);
     bool &skipBTagScaleFactors = flag("skip_btag_sf,skip-btag-sf", "Skip b-tag SF application (normally enabled)").set_default(false);
     bool &no_systs = flag("no_systs", "Skip all JES/JER variation branches (nominal only)").set_default(false);
+    bool &no_jetveto = flag("no_jetveto", "DEBUG ONLY: compute Jet_vetoMap but do not apply it (no Run 3 event veto, no jet masking). NOT for analysis production").set_default(false);
 };
 
 RNode runAnalysis(RNode df, std::string ana, std::string run_number, bool isSignal, bool isData, SPANet::SPANetInference *spanet_inference, SPANetRun2::SPANetInference *spanet_inference_run2, bool runSPANetInference = false, bool makeSpanetTrainingdata = false)
@@ -72,6 +73,23 @@ int main(int argc, char** argv) {
     std::string output_file = args.name;
 
     setStoreSysts(!args.no_systs);
+
+    setApplyJetVetoMaps(!args.no_jetveto);
+    if (args.no_jetveto) {
+        std::cout << "\n"
+                  << "  ############################################################\n"
+                  << "  ##  WARNING: --no_jetveto is a DEBUGGING flag             ##\n"
+                  << "  ############################################################\n"
+                  << "  Jet_vetoMap is computed but NOT applied: the Run 3 event\n"
+                  << "  veto is off and no jet is masked by it. This output is NOT\n"
+                  << "  veto-map corrected -- it keeps jets in known-bad (eta, phi)\n"
+                  << "  regions and, in Run 3, the spurious MET the veto removes.\n"
+                  << "  DO NOT use it for an analysis production. Intended only for\n"
+                  << "  the veto map validation study, which needs the un-vetoed\n"
+                  << "  'before' state (see vbs-coffea/scripts/jetveto_studies).\n"
+                  << "  ############################################################\n"
+                  << std::endl;
+    }
 
     if (args.nthread > 64) {
         std::cerr << "Error: nthread cannot exceed 64 (requested: " << args.nthread << ")" << std::endl;

@@ -479,7 +479,16 @@ namespace argparse {
                         entry->error = "No value provided for: " + key;
                     }
                 } else {
-                    cerr << "unrecognised commandline argument: " << key << endl;
+                    // Hard failure, not a warning. A warning here only reaches
+                    // stderr, and a silently-ignored flag produces output that
+                    // LOOKS fine but was made with the wrong configuration
+                    // (e.g. a whole production run without the --no_jetveto it
+                    // was submitted with, because a caller passed several flags
+                    // glued into one argv token).
+                    cerr << "FATAL: unrecognised commandline argument: '" << key << "'" << endl;
+                    cerr << "       (if this looks like several flags in one token, the caller "
+                            "quoted them together -- pass each flag as its own argv entry)" << endl;
+                    exit(-1);
                 }
             };
             auto add_param = [&](size_t &i, const size_t &start) {

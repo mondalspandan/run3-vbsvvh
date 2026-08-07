@@ -122,6 +122,7 @@ def main():
     parser.add_argument('--btag-eff',                  help = 'Write raw selected-AK4 b-tag efficiency histograms (MC only)', action='store_true')
     parser.add_argument('--year',                      help = 'Required metadata year for --btag-eff production')
     parser.add_argument('--skip-btag-sf',              help = 'Skip b-tag SF application (normally enabled)', action='store_true')
+    parser.add_argument('--no_jetveto',                help = 'DEBUG ONLY: compute Jet_vetoMap but do not apply it', action='store_true')
     parser.add_argument('--qos',                       help = 'qos for slurm submission (slurm only)', default='avery')
     args = parser.parse_args()
     if args.btag_eff and not args.year:
@@ -208,19 +209,20 @@ def main():
 
             # Construct the backend command.
             hlt_flag = " --store_hlt" if args.store_hlt else ""
+            jetveto_flag = " --no_jetveto" if args.no_jetveto else ""
             btag_eff_flag = " --btag-eff" if args.btag_eff else ""
             skip_btag_sf_flag = " --skip-btag-sf" if args.skip_btag_sf else ""
             sample_flag = f" --sample '{args.sample}'" if args.sample else ""
             if args.mode == "local":
                 local_name = f"{args.outname}_{sample_name}" if sample_name else args.outname
-                command = f"bin/runAnalysis -i {merged_json_name} -o {outdir} -n {local_name} -a {chan_name} -j {args.n_cores or 64} --run_number {args.run} --progress{hlt_flag}{' --btag_eff' if args.btag_eff else ''}{' --skip-btag-sf' if args.skip_btag_sf else ''}"
+                command = f"bin/runAnalysis -i {merged_json_name} -o {outdir} -n {local_name} -a {chan_name} -j {args.n_cores or 64} --run_number {args.run} --progress{hlt_flag}{jetveto_flag}{' --btag_eff' if args.btag_eff else ''}{' --skip-btag-sf' if args.skip_btag_sf else ''}"
                 print(f"  -> Now running command \"{command}\"...\n")
                 if not args.dry_run:
                     subprocess.run(command, shell=True, check=True)
             elif args.mode == "condor":
                 dry_run_flag = " --dry-run" if args.dry_run else ""
                 ncores_flag = f" -j {args.n_cores}" if args.n_cores else ""
-                command = f"python3 condor/submit.py -c {merged_json_name} -a {chan_name} --run_number {args.run} --files-per-job {args.files_per_job}{ncores_flag}{hlt_flag}{btag_eff_flag}{skip_btag_sf_flag}{sample_flag}{dry_run_flag}"
+                command = f"python3 condor/submit.py -c {merged_json_name} -a {chan_name} --run_number {args.run} --files-per-job {args.files_per_job}{ncores_flag}{hlt_flag}{jetveto_flag}{btag_eff_flag}{skip_btag_sf_flag}{sample_flag}{dry_run_flag}"
                 print(f"  -> Running command \"{command}\"...\n")
                 subprocess.run(command, shell=True, check=True)
             elif args.mode == "slurm":
@@ -230,7 +232,7 @@ def main():
                 ncores_flag = f" -j {args.n_cores}" if args.n_cores else ""
                 year_flag = f" --year {args.year}" if args.btag_eff else ""
                 qos_flag = f" --qos {args.qos}" if args.qos else ""
-                command = f"python3 slurm/submit.py -c {merged_json_name} -a {chan_name} --run_number {args.run} --files-per-job {args.files_per_job} --account avery{qos_flag} -o {outdir}{year_flag}{hlt_flag}{btag_eff_flag}{skip_btag_sf_flag}{dry_run_flag}{memory_flag}{time_flag}{ncores_flag}{sample_flag}"
+                command = f"python3 slurm/submit.py -c {merged_json_name} -a {chan_name} --run_number {args.run} --files-per-job {args.files_per_job} --account avery{qos_flag} -o {outdir}{year_flag}{hlt_flag}{jetveto_flag}{btag_eff_flag}{skip_btag_sf_flag}{dry_run_flag}{memory_flag}{time_flag}{ncores_flag}{sample_flag}"
                 print(f"  -> Running command \"{command}\"...\n")
                 subprocess.run(command, shell=True, check=True)
 

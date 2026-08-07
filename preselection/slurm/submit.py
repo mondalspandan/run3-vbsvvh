@@ -176,6 +176,8 @@ Examples:
                         help="Required metadata year for --btag-eff production")
     parser.add_argument("--skip-btag-sf", action="store_true",
                         help="Skip b-tag SF application (normally enabled)")
+    parser.add_argument("--no_jetveto", action="store_true",
+                        help="DEBUG ONLY: compute Jet_vetoMap but do not apply it")
     parser.add_argument("--account", default=None,
                         help="SLURM account (e.g., avery)")
     parser.add_argument("--qos", default=None,
@@ -250,6 +252,8 @@ def generate_slurm_script(task_dir: Path, job_dir: Path, job_name: str,
         extra_flags += " --btag_eff"
     if args.skip_btag_sf:
         extra_flags += " --skip-btag-sf"
+    if args.no_jetveto:
+        extra_flags += " --no_jetveto"
 
     # Add optional account and qos lines
     acct_line = f"#SBATCH --account={args.account}\n" if args.account else ""
@@ -307,6 +311,8 @@ def generate_array_sbatch(task_dir: Path, job_entries: List[dict],
         extra_flags += " --btag_eff"
     if args.skip_btag_sf:
         extra_flags += " --skip-btag-sf"
+    if args.no_jetveto:
+        extra_flags += " --no_jetveto"
 
     # Add optional account and qos lines
     acct_line = f"#SBATCH --account={args.account}\n" if args.account else ""

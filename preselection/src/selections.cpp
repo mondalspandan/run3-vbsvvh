@@ -235,8 +235,15 @@ RNode AK4JetsSelection(RNode df_, bool cleanAgainstFJ, std::string affix)
                                     "(Jet_jetId >= 2)"); // NanoAOD jetID convention https://twiki.cern.ch/twiki/bin/view/CMSPublic/WorkBookNanoAOD#Jets
                                                         // should still work for skims < v28, which set jetId==3 : "pass tight ID, fail tightLepVeto", jetId==7 : "pass tight and tightLepVeto ID"
 
-    df = df.Filter("(isRun2) || (isRun3 && !Any(Jet_vetoMap))");
-    df = df.Redefine("_good_ak4jets", "_good_ak4jets && !Jet_vetoMap");
+    // Jet veto maps. Run 3 drops the whole event (the veto exists to remove the spurious
+    // MET a bad-region jet induces, which masking the jet alone would not undo); Run 2
+    // drops only the jets. Both are skipped under --no_jetveto, which leaves Jet_vetoMap
+    // defined but unapplied -- DEBUGGING ONLY, see corrections.h.
+    const std::string vetoTerm = applyJetVetoMapsEnabled() ? " && !Jet_vetoMap" : "";
+    if (applyJetVetoMapsEnabled()) {
+        df = df.Filter("(isRun2) || (isRun3 && !Any(Jet_vetoMap))");
+        df = df.Redefine("_good_ak4jets", "_good_ak4jets && !Jet_vetoMap");
+    }
 
     df = applyObjectMaskNewAffix(df, "_good_ak4jets", "Jet", affix);
     df = df.Define("ht_" + affix, "Sum(" + affix + "_pt)");
@@ -265,7 +272,7 @@ RNode AK4JetsSelection(RNode df_, bool cleanAgainstFJ, std::string affix)
                            {"Jet_eta", "Jet_phi", "_fatjet_eta_" + sfx, "_fatjet_phi_" + sfx});
             df = df.Define("Jet_isGood_" + sfx,
                            ak4GoodJetSelectionExpr("Jet_pt_" + sfx)
-                               + " && !Jet_vetoMap && _dR_ak4_fatjet_" + sfx + " > 0.8");
+                               + vetoTerm + " && _dR_ak4_fatjet_" + sfx + " > 0.8");
             df = df.Define("njet_" + sfx, "Sum(Jet_isGood_" + sfx + ")");
         }
     }
@@ -278,7 +285,7 @@ RNode AK4JetsSelection(RNode df_, bool cleanAgainstFJ, std::string affix)
         df = df.Define("Jet_isGoodNoFJClean", "_good_ak4jets");
         for (const auto& sfx : activeKinVariations(df)) {
             df = df.Define("Jet_isGoodNoFJClean_" + sfx,
-                           ak4GoodJetSelectionExpr("Jet_pt_" + sfx) + " && !Jet_vetoMap");
+                           ak4GoodJetSelectionExpr("Jet_pt_" + sfx) + vetoTerm);
             df = df.Define("njetNoFJClean_" + sfx, "Sum(Jet_isGoodNoFJClean_" + sfx + ")");
         }
     }
