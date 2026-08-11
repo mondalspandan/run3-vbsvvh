@@ -120,12 +120,12 @@ The converter requires complete manifests and schema-v2 raw outputs. It uses the
 
 Edit `applybtag.yaml` to choose the ordered WPs needed by each channel, for example `4lep: [L, T]`. The runtime evaluates only the configured WPs and automatically excludes the others. Use `[]` or `--skip-btag-sf` to disable SF application for a channel/invocation. When SFs are disabled, the `*_withbSF`, `weightsyst_jes`, and `weightsyst_jer` branches are not written.
 
-The nominal `weight` already contains the central HF and LF b-tag factors, which are also available independently as `weight_btagging_sf_HF_uncorrelated_<year>[0]` and `weight_btagging_sf_LF_uncorrelated_<year>[0]`. To remove only the nominal b-tag correction for a diagnostic or post-processing comparison, use
+The nominal `weight` already contains the central HF and LF b-tag factors, which are also available independently as `weightsyst_btag_HF_uncorrelated_<year>[0]` and `weightsyst_btag_LF_uncorrelated_<year>[0]`. To remove only the nominal b-tag correction for a diagnostic or post-processing comparison, use
 
 ```text
 weight_without_btag = weight /
-  (weight_btagging_sf_HF_uncorrelated_<year>[0] *
-   weight_btagging_sf_LF_uncorrelated_<year>[0])
+  (weightsyst_btag_HF_uncorrelated_<year>[0] *
+   weightsyst_btag_LF_uncorrelated_<year>[0])
 ```
 
 This retains the other corrections in `weight`. `baseweight` is instead before all lepton, b-tag, and other corrections, while the internal `_weight_*_raw` columns are not snapshotted.
@@ -133,14 +133,14 @@ This retains the other corrections in `weight`. `baseweight` is instead before a
 Systematic branches are `{central, up, down}` vectors. Recommended branches to use in your postprocessor:
 
 - **Simplified (where AK4 b-tag systematics are expected to be sub-dominant):**
-  - HF: `weight_btagging_sf_HF_correlated`, `weight_btagging_sf_HF_uncorrelated_<year>`
-  - LF: `weight_btagging_sf_LF_correlated`, `weight_btagging_sf_LF_uncorrelated_<year>`
+  - HF: `weightsyst_btag_HF_correlated`, `weightsyst_btag_HF_uncorrelated_<year>`
+  - LF: `weightsyst_btag_LF_correlated`, `weightsyst_btag_LF_uncorrelated_<year>`
   - Other SFs: `weight_pileup`, `weight_PSISR`, `weight_PSFSR`, `weight_muF`, and `weight_muR`
   - With JES variation responses: simply use nominal event weight `weight`
 
 - **Full breakdown (where AK4 b-tag systematics are found to be dominant):**
-  - HF: `weight_btagging_sf_HF_pdf`, `weight_btagging_sf_HF_as`, `weight_btagging_sf_HF_pdfas`, `weight_btagging_sf_HF_ttbar`, `weight_btagging_sf_HF_type3`, `weight_btagging_sf_HF_bfragmentation`, `weight_btagging_sf_HF_topmass`, `weight_btagging_sf_HF_hdamp`, and `weight_btagging_sf_HF_statistic_<year>`
-  - LF: `weight_btagging_sf_LF_correlated`, `weight_btagging_sf_LF_uncorrelated_<year>`
+  - HF: `weightsyst_btag_HF_pdf`, `weightsyst_btag_HF_as`, `weightsyst_btag_HF_pdfas`, `weightsyst_btag_HF_ttbar`, `weightsyst_btag_HF_type3`, `weightsyst_btag_HF_bfragmentation`, `weightsyst_btag_HF_topmass`, `weightsyst_btag_HF_hdamp`, and `weightsyst_btag_HF_statistic_<year>`
+  - LF: `weightsyst_btag_LF_correlated`, `weightsyst_btag_LF_uncorrelated_<year>`
   - Other SFs: `weight_pileup_withbSF`, `weight_PSISR_withbSF`, `weight_PSFSR_withbSF`, `weight_muF_withbSF`, and `weight_muR_withbSF`
   - With JES variation responses: `weightsyst_jes`, `weightsyst_jer`
 

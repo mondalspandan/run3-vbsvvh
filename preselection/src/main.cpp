@@ -278,8 +278,6 @@ int main(int argc, char** argv) {
     }
 
     saveSnapshot(df, output_dir, output_file, isSignal, args.dumpInput, args.storeHLT);
-    if (!isData && channelBTagScaleFactors && !args.skipBTagScaleFactors)
-        printBTagDiagnostics();
     Cutflow::Print();
 
     return 0;

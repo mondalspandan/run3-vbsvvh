@@ -49,7 +49,7 @@ bool bTagHFSourceAvailable(const std::string &year, std::string_view source) {
 }
 
 std::string bTagHFBranchName(std::string_view source, const std::string &year) {
-    std::string name = "weight_btagging_sf_HF_" + std::string(source);
+    std::string name = "weightsyst_btag_HF_" + std::string(source);
     if (source == "uncorrelated" || source == "statistic") name += "_" + bTagSafeYearToken(year);
     return name;
 }
@@ -872,9 +872,9 @@ RNode applyBTaggingScaleFactors(std::unordered_map<std::string, correction::Corr
                                [index](const BTagWeightBundle &bundle) { return bundle.hf[index]; }, {"_btagging_sf_bundle"});
     }
     const std::string hf_uncorrelated = bTagHFBranchName("uncorrelated", nuisance_year);
-    const std::string lf_uncorrelated = "weight_btagging_sf_LF_uncorrelated_" + bTagSafeYearToken(nuisance_year);
+    const std::string lf_uncorrelated = "weightsyst_btag_LF_uncorrelated_" + bTagSafeYearToken(nuisance_year);
     return result.Define(lf_uncorrelated, [](const BTagWeightBundle &bundle) { return bundle.lf_uncorrelated; }, {"_btagging_sf_bundle"})
-                 .Define("weight_btagging_sf_LF_correlated", [](const BTagWeightBundle &bundle) { return bundle.lf_correlated; }, {"_btagging_sf_bundle"});
+                 .Define("weightsyst_btag_LF_correlated", [](const BTagWeightBundle &bundle) { return bundle.lf_correlated; }, {"_btagging_sf_bundle"});
 }
 
 /*
@@ -1068,7 +1068,7 @@ RNode applyMCWeights(RNode df_, const std::string &channel, const std::string &s
         "";
     if (apply_btag_sf)
         nominal_weight += bTagHFBranchName("uncorrelated", nuisance_year) + "[0] * "
-                          "weight_btagging_sf_LF_uncorrelated_" +
+                          "weightsyst_btag_LF_uncorrelated_" +
                           bTagSafeYearToken(nuisance_year) + "[0] * ";
     nominal_weight +=
         "ewkweight * "
