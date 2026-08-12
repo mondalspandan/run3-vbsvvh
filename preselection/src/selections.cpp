@@ -316,6 +316,31 @@ RNode AK8JetsSelection(RNode df_)
     auto df = df_.Define("_dR_ak8_lep", VVdR, {"FatJet_eta", "FatJet_phi", "lepton_eta", "lepton_phi"})
                   .Define("_good_ak8jets", ak8GoodJetSelectionExpr("FatJet_pt"));
 
+    // GloParT regressed mass: the calibrated AK8 mass used by the analysis. massCorrX2p is a
+    // ratio predicting the particle-level mass from the RAW jet, so it multiplies the raw mass
+    // snapshotted before JEC (_FatJet_rawmass, from snapshotRawJetKinematics in corrections.cpp)
+    // rather than the JEC/JER-corrected FatJet_mass. It replaces the JEC/JER mass calibration
+    // for AK8 and is not stacked on top of it. Defined before applyObjectMaskNewAffix so the
+    // masked fatjet_massGloParT3 alias is created with the rest of the collection.
+    df = df.Define("FatJet_massGloParT3", "FatJet_globalParT3_massCorrX2p * _FatJet_rawmass");
+
+    // GloParT tagging discriminants, built from the raw score outputs as signal / (signal + QCD):
+    //   Hbb = Xbb / (Xbb + QCD)
+    //   Wqq = (Xqq/3 + Xcs) / (Xqq/3 + Xcs + QCD)
+    // Unlike the mass these are kinematics-independent, so they need no raw-quantity snapshot.
+    // Jets with a vanishing denominator (no score at all) get -1 rather than a NaN.
+    auto vsQCD = [](const RVec<float>& sig, const RVec<float>& qcd) {
+        RVec<float> out(sig.size(), -1.0f);
+        for (size_t i = 0; i < sig.size(); ++i) {
+            const float den = sig[i] + qcd[i];
+            if (den > 0.0f) out[i] = sig[i] / den;
+        }
+        return out;
+    };
+    df = df.Define("_FatJet_Vqq_score", "FatJet_globalParT3_Xqq / 3.0f + FatJet_globalParT3_Xcs")
+           .Define("FatJet_Hbb", vsQCD, {"FatJet_globalParT3_Xbb", "FatJet_globalParT3_QCD"})
+           .Define("FatJet_Wqq", vsQCD, {"_FatJet_Vqq_score",     "FatJet_globalParT3_QCD"});
+
     df = applyObjectMaskNewAffix(df, "_good_ak8jets", "FatJet", "fatjet");
     df = df.Define("ht_fatjets", "Sum(fatjet_pt)");
 

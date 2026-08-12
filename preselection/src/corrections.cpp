@@ -1859,10 +1859,19 @@ GENERAL CORRECTIONS
 ############################################
 */
 
+// Preserve the raw jet kinematics before JEC/JER rescale the stored columns. Both consumers
+// run later in the graph and cannot recover these values themselves: JEC keeps *_rawFactor
+// consistent with the new pt/mass, but JER rescales pt and mass without updating it, so from
+// that point on (1 - rawFactor)*x is the raw value times the smear factor, not the raw value.
+//   _Jet_rawpt      -> applyType1MET, which rebuilds the MET sum from raw AK4 jets.
+//   _FatJet_rawmass -> AK8JetsSelection, which builds the GloParT regressed mass.
+RNode snapshotRawJetKinematics(RNode df) {
+    return df.Define("_Jet_rawpt",      "(1.0f - Jet_rawFactor) * Jet_pt")
+             .Define("_FatJet_rawmass", "(1.0f - FatJet_rawFactor) * FatJet_mass");
+}
+
 RNode applyDataCorrections(RNode df_) {
-    // Snapshot the raw AK4 pt before JEC mutates Jet_pt — applyType1MET rebuilds the MET
-    // from these raw jets (Jet_rawFactor is reset by JEC, so raw pt can't be recovered later).
-    auto df = df_.Define("_Jet_rawpt", "(1.0f - Jet_rawFactor) * Jet_pt");
+    auto df = snapshotRawJetKinematics(df_);
     // Re-apply the latest JEC stack (raw recovery + L1*L2*L3*Residual compound). No MET
     // propagation here — Type-I MET is rebuilt from RawPuppiMET in applyType1MET below.
     df = applyJetEnergyCorrections(jetEnergyCorrections(),
@@ -1882,10 +1891,7 @@ RNode applyDataCorrections(RNode df_) {
 }
 
 RNode applyMCCorrections(RNode df_) {
-    // Snapshot the raw AK4 pt before JEC mutates Jet_pt — applyType1MET rebuilds the MET from
-    // these raw jets (Jet_rawFactor is reset by JEC + JER doesn't update it, so raw pt can't be
-    // recovered from the mutated columns afterwards).
-    auto df = df_.Define("_Jet_rawpt", "(1.0f - Jet_rawFactor) * Jet_pt");
+    auto df = snapshotRawJetKinematics(df_);
     // Nominal JEC for AK4 and AK8 (no MET propagation here).
     df = applyJetEnergyCorrections(jetEnergyCorrections(),
                                    jetEnergyCorrections_JEC_prefix(),
