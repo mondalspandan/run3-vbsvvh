@@ -42,25 +42,8 @@ RVec<bool> isbTagTight(std::string year, RVec<float> btag_score);
 MET CORRECTIONS
 ############################################
 */
-// Run 2 MET-φ (XY) correction. Runs AFTER applyType1MET and applyMETUnclusteredVariations
-// and Redefines the already-built MET in place — the nominal met_pt/met_phi AND every
-// variation present in the graph (JES, JER, UES). Correcting the nominal only leaves a
-// spurious nominal-vs-varied offset inside every MET shape systematic. No-op on Run 3
-// (metCorrections() has Run 2 entries only); warns once per unknown era.
-RNode applyMETPhiCorrections(RNode df, bool isData);
 
-// MET unclustered energy (UES) ±1σ — MC only, systematics-gated.
-// MET = -Σ p_T over ALL PF candidates; the part clustered into Type-1 jets is covered by
-// JES/JER (already propagated by applyType1MET), while the unclustered remainder (soft
-// candidates, sub-threshold jets, pileup, HF) has its own scale uncertainty, computed by
-// CMSSW from exactly the candidates the Type-1 jet sum EXCLUDES. Disjoint by construction
-// ⇒ an independent nuisance that is never combined with a JES/JER shift, and whose shift
-// vector is JEC-invariant. Lifts that vector from the nano pre-shifted
-// PuppiMET_{pt,phi}Unclustered{Up,Down} and adds it to OUR rebuilt Type-1 MET, writing
-// met_pt_metunclUp/Dn + met_phi_metunclUp/Dn. No jet columns are produced — UES does not
-// move jets. Must run AFTER applyType1MET (it reads met_pt/met_phi) and BEFORE
-// applyMETPhiCorrections. Throws if the NanoAOD input lacks the branches (see the
-// hard-fail rationale in corrections.cpp).
+RNode applyMETPhiCorrections(RNode df, bool isData);
 RNode applyMETUnclusteredVariations(RNode df, bool isData);
 
 /*
@@ -137,18 +120,14 @@ void setStoreSysts(bool v);
 // ---------------------------------------------------------------------------------------
 // DEBUGGING ONLY — jet veto map "compute but do not apply" mode.
 //
-// Called with false (via --no_jetveto), applyJetVetoMaps still DEFINES the per-jet
-// Jet_vetoMap flag, but AK4JetsSelection stops acting on it: the Run 3 event filter and
-// the `&& !Jet_vetoMap` term in every good-AK4 mask are both skipped. The output then
-// contains the events and jets the veto would have removed, tagged by Jet_vetoMap, so a
-// before/after study can be made from a SINGLE production by cutting on the flag offline.
-//
+// Called with false (via --no_jetveto).
 // *** NEVER use this for an analysis production. *** Output produced with --no_jetveto is
 // NOT veto-map corrected: it retains jets in known-bad (eta, phi) regions and, in Run 3,
 // events carrying the spurious MET the veto exists to remove. It is for the jet veto map
-// validation study only (vbs-coffea/scripts/jetveto_studies).
+// validation study only.
 void setApplyJetVetoMaps(bool v);
 bool applyJetVetoMapsEnabled();
+// ---------------------------------------------------------------------------------------
 
 // Public accessors for the variation suffixes. All return empty when
 // setStoreSysts(false) has been called.
@@ -156,30 +135,16 @@ bool applyJetVetoMapsEnabled();
 //   jerVariationSuffixes:       {"jerUp", "jerDn"}
 //   kinematicVariationSuffixes: JES + JER combined — the full list of suffixes for which
 //                               <collection>_pt_<sfx>/_mass_<sfx> (+ met_pt_<sfx>) may exist.
-//                               Consumers building per-variation selections should loop over
-//                               this and check column presence (variations are produced on MC
-//                               only today, and only by the correction steps that ran).
+//                               Consumers building per-variation selections should loop over this.
 //   unclusteredVariationSuffixes: {"metunclUp", "metunclDn"} — the MET-only UES suffixes.
-//                               Deliberately NOT folded into kinematicVariationSuffixes():
-//                               UES does not move jets, so there are no Jet_pt_<sfx> /
-//                               FatJet_pt_<sfx> columns, no per-variation good-jet masks and
-//                               no passes_<channel>_<sfx> flags. Downstream must use the
-//                               NOMINAL event selection together with the varied MET.
-//   metVariationSuffixes:       kinematic + unclustered — every suffix for which
-//                               met_pt_<sfx>/met_phi_<sfx> may exist. Consumed by
-//                               applyMETPhiCorrections, which presence-checks each one.
 std::vector<std::string> jesVariationSuffixes();
 std::vector<std::string> jerVariationSuffixes();
 std::vector<std::string> kinematicVariationSuffixes();
 std::vector<std::string> unclusteredVariationSuffixes();
-std::vector<std::string> metVariationSuffixes();
 
 // JER hybrid smearing (MC only). Defines Jet_jerFactor and redefines Jet_pt/Jet_mass to the
 // nominal-smeared values. With storeVariations, also writes the ±1σ SF variation branches
-// Jet_jerFactor_jerUp/Dn and Jet_pt/mass_jerUp/Dn (from the same pre-smear baseline, same
-// stochastic seed → fully correlated with the nominal). The ±1σ SF is ScaleFactor ±
-// SFUncertainty (split-tag format; the pinned ScaleFactor has no `systematic` axis).
-// All factors are consumed by applyType1MET for the MET rebuild.
+// Jet_jerFactor_jerUp/Dn and Jet_pt/mass_jerUp/Dn. 
 RNode applyJetEnergyResolution(const std::unordered_map<std::string, correction::CorrectionSet>& cset_jerc,
                                const std::unordered_map<std::string, correction::CorrectionSet>& cset_jer_smear,
                                const std::unordered_map<std::string, std::string>& jer_res_map,

@@ -1126,13 +1126,6 @@ std::vector<std::string> unclusteredVariationSuffixes() {
 // ones written by applyType1MET plus the MET-only UES ones. Deliberately NOT merged into
 // kinematicVariationSuffixes() — that list drives the per-variation JET columns and the
 // channel-pass flags in selections.cpp, which UES has none of.
-std::vector<std::string> metVariationSuffixes() {
-    auto out = kinematicVariationSuffixes();
-    auto uncl = unclusteredVariationSuffixes();
-    out.insert(out.end(), uncl.begin(), uncl.end());
-    return out;
-}
-
 /*
 ############################################
 TYPE-1 PUPPI MET — full rebuild from RawPuppiMET
@@ -1546,21 +1539,56 @@ RNode applyMETPhiCorrections(RNode df, bool isData) {
     // Runs after applyType1MET + applyMETUnclusteredVariations, so it refines the
     // already-rebuilt MET rather than starting from PuppiMET. 
     // TO CHECK IF THIS IS CORRECT
-    auto correct_one = [&eval_correction](RNode d, const std::string& sfx) {
+    // The correction is a fixed offset in (px, py): the JSON adds -(a*npvs + b, c*npvs + d),
+    // independent of the MET being corrected. So evaluate it ONCE per event and add that
+    // offset to the nominal and to every variation — the same correction for all of them,
+    // which is what it has to be. Evaluating per column instead cost one correctionlib
+    // lookup per MET variation (~25 with --systs) to recompute the same two numbers.
+    //
+    // It is added to each varied column rather than corrected once on the nominal and
+    // inherited, because the variations are not built from the nominal: applyType1MET
+    // rebuilds each JES/JER MET independently from RawPuppiMET with its own jet factors,
+    // so met_pt_<sfx> never references met_pt. Only the UES columns are nominal + delta,
+    // and they are built before this step. Adding a translation to each column is anyway
+    // identical to displacing a corrected nominal: (nom - d) + (var - nom) = var - d.
+    auto eval_shift = [eval_correction](std::string year, unsigned char npvs, unsigned int run) {
+        const auto probe = eval_correction(year, 0.f, 0.f, npvs, run);
+        return std::make_pair(
+            static_cast<float>((double)probe.first * std::cos((double)probe.second)),
+            static_cast<float>((double)probe.first * std::sin((double)probe.second)));
+    };
+    df = df.Define("_MET_xyshift", eval_shift, {"year", "PV_npvs", "run"});
+
+    // Both components come from ONE helper per column. Redefining met_pt_<sfx> first and
+    // met_phi_<sfx> second would make the phi Redefine resolve an already-corrected pt,
+    // mixing correction stages. The helper is Defined against the PRE-correction pair;
+    // RDF's graph is functional, so that is not a cycle — the helper resolves its inputs
+    // at its own position and each Redefine creates a new node downstream of it.
+    auto apply_shift = [](float pt, float phi, const std::pair<float, float> &s) {
+        const double px = (double)pt * std::cos((double)phi) + (double)s.first;
+        const double py = (double)pt * std::sin((double)phi) + (double)s.second;
+        return std::make_pair(static_cast<float>(std::hypot(px, py)),
+                              static_cast<float>(std::atan2(py, px)));
+    };
+    auto correct_one = [&apply_shift](RNode d, const std::string& sfx) {
         const std::string tail   = sfx.empty() ? std::string{} : "_" + sfx;
         const std::string ptCol  = "met_pt"  + tail;
         const std::string phiCol = "met_phi" + tail;
         const std::string helper = "_MET_phicorr" + tail;
-        d = d.Define(helper, eval_correction, {"year", ptCol, phiCol, "PV_npvs", "run"});
+        d = d.Define(helper, apply_shift, {ptCol, phiCol, "_MET_xyshift"});
         return d.Redefine(ptCol,  helper + ".first")
                 .Redefine(phiCol, helper + ".second");
     };
 
     df = correct_one(df, "");
-    for (const auto& sfx : metVariationSuffixes()) {
-        if (!df.HasColumn("met_pt_" + sfx) || !df.HasColumn("met_phi_" + sfx)) continue;
-        df = correct_one(df, sfx);
+
+    std::vector<std::string> metSuffixes;
+    for (auto&& col : df.GetDefinedColumnNames()) {
+        if (!col.starts_with("met_pt_")) continue;
+        const std::string sfx = std::string(col).substr(sizeof("met_pt_") - 1);
+        if (df.HasColumn("met_phi_" + sfx)) metSuffixes.push_back(sfx);
     }
+    for (const auto& sfx : metSuffixes) df = correct_one(df, sfx);
     return df;
 }
 
@@ -1923,9 +1951,7 @@ RNode applyMCCorrections(RNode df_) {
     // Rebuild Type-I MET from RawPuppiMET over Jet + CorrT1METJet, for the nominal and every
     // JES/JER variation.
     df = applyType1MET(df, /*isData=*/false);
-    // UES ±1σ on top of the rebuilt Type-I MET, BEFORE the φ correction: the nano shift
-    // vector is itself defined relative to an un-φ-corrected MET. The φ correction is then
-    // applied to the nominal and to every variation (JES, JER, UES) alike.
+    // UES ±1σ on top of the rebuilt Type-I MET
     df = applyMETUnclusteredVariations(df, /*isData=*/false);
     df = applyMETPhiCorrections(df, false);
     // GloParT JMS/JMR would be wired here via applyJetMassScale / applyJetMassResolution
