@@ -141,7 +141,7 @@ Systematic branches are `{central, up, down}` vectors. Recommended branches to u
 - **Full breakdown (where AK4 b-tag systematics are found to be dominant):**
   - HF: `weightsyst_btag_HF_pdf`, `weightsyst_btag_HF_as`, `weightsyst_btag_HF_pdfas`, `weightsyst_btag_HF_ttbar`, `weightsyst_btag_HF_type3`, `weightsyst_btag_HF_bfragmentation`, `weightsyst_btag_HF_topmass`, `weightsyst_btag_HF_hdamp`, and `weightsyst_btag_HF_statistic_<year>`
   - LF: `weightsyst_btag_LF_correlated`, `weightsyst_btag_LF_uncorrelated_<year>`
-  - Other SFs: `weight_pileup_withbSF`, `weight_PSISR_withbSF`, `weight_PSFSR_withbSF`, `weight_muF_withbSF`, and `weight_muR_withbSF`
+  - Other SFs: `weightsyst_pileup_withbSF`, `weightsyst_PSISR_withbSF`, `weightsyst_PSFSR_withbSF`, `weightsyst_muF_withbSF`, and `weightsyst_muR_withbSF`
   - With JES variation responses: `weightsyst_jes`, `weightsyst_jer`
 
 

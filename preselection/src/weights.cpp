@@ -1030,21 +1030,21 @@ RNode applyMCWeights(RNode df_, const std::string &channel, const std::string &s
            .Define("weight_muF", [](const RVec<float> &weight) { return weight; }, {"_weight_muF_raw"})
            .Define("weight_muR", [](const RVec<float> &weight) { return weight; }, {"_weight_muR_raw"});
     if (apply_btag_sf) {
-        df = df.Define("weight_pileup_withbSF", correlateWeightWithBTagSource<double>,
+        df = df.Define("weightsyst_pileup_withbSF", correlateWeightWithBTagSource<double>,
                        {"_weight_pileup_raw", bTagHFInternalBranchName("pileup")})
-               .Define("weight_PSISR_withbSF", correlateWeightWithBTagSource<float>,
+               .Define("weightsyst_PSISR_withbSF", correlateWeightWithBTagSource<float>,
                        {"_weight_PSISR_raw", bTagHFInternalBranchName("isrdef")})
-               .Define("weight_PSFSR_withbSF", correlateWeightWithBTagSource<float>,
+               .Define("weightsyst_PSFSR_withbSF", correlateWeightWithBTagSource<float>,
                        {"_weight_PSFSR_raw", bTagHFInternalBranchName("fsrdef")})
-               .Define("weight_muF_withbSF", correlateWeightWithBTagSource<float>,
+               .Define("weightsyst_muF_withbSF", correlateWeightWithBTagSource<float>,
                        {"_weight_muF_raw", bTagHFInternalBranchName("muf")})
-               .Define("weight_muR_withbSF", correlateWeightWithBTagSource<float>,
+               .Define("weightsyst_muR_withbSF", correlateWeightWithBTagSource<float>,
                        {"_weight_muR_raw", bTagHFInternalBranchName("mur")});
     }
 
-    // Keep the upstream `weightsyst_*` naming on the untouched analysis
-    // variations.  Consumers that want b-tag-correlated variations should use
-    // the explicit *_withbSF branches above.
+    // Keep `weight_*` for the untouched event-level analysis variations.
+    // B-tag-correlated variations use the `weightsyst_*` namespace.
+
     df = df.Define("weightsyst_pileup", [](const RVec<double> &weight) { return weight; }, {"weight_pileup"})
            .Define("weightsyst_PSISR", [](const RVec<float> &weight) { return weight; }, {"weight_PSISR"})
            .Define("weightsyst_PSFSR", [](const RVec<float> &weight) { return weight; }, {"weight_PSFSR"})
