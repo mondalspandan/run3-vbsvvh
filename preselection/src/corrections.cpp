@@ -1539,11 +1539,6 @@ RNode applyMETPhiCorrections(RNode df, bool isData) {
     // Runs after applyType1MET + applyMETUnclusteredVariations, so it refines the
     // already-rebuilt MET rather than starting from PuppiMET. 
     // TO CHECK IF THIS IS CORRECT
-    // The correction is a fixed offset in (px, py): the JSON adds -(a*npvs + b, c*npvs + d),
-    // independent of the MET being corrected. So evaluate it ONCE per event and add that
-    // offset to the nominal and to every variation — the same correction for all of them,
-    // which is what it has to be. Evaluating per column instead cost one correctionlib
-    // lookup per MET variation (~25 with --systs) to recompute the same two numbers.
     //
     // It is added to each varied column rather than corrected once on the nominal and
     // inherited, because the variations are not built from the nominal: applyType1MET
@@ -1559,11 +1554,6 @@ RNode applyMETPhiCorrections(RNode df, bool isData) {
     };
     df = df.Define("_MET_xyshift", eval_shift, {"year", "PV_npvs", "run"});
 
-    // Both components come from ONE helper per column. Redefining met_pt_<sfx> first and
-    // met_phi_<sfx> second would make the phi Redefine resolve an already-corrected pt,
-    // mixing correction stages. The helper is Defined against the PRE-correction pair;
-    // RDF's graph is functional, so that is not a cycle — the helper resolves its inputs
-    // at its own position and each Redefine creates a new node downstream of it.
     auto apply_shift = [](float pt, float phi, const std::pair<float, float> &s) {
         const double px = (double)pt * std::cos((double)phi) + (double)s.first;
         const double py = (double)pt * std::sin((double)phi) + (double)s.second;
