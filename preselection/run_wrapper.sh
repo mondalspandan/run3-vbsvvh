@@ -45,18 +45,26 @@ echo "Batch mode: $MODE"
 
 # ---- Batch submission: signal + per-channel bkg/data, for Run 2 and Run 3 ----
 
-# Channels to run. Each call processes signal + per-channel bkg + data
-# together (run_rdf.py auto-resolves inputs from -c). Use `all` to run
-# every physics channel in run_rdf.py's ANA_CHANNELS dict.
+# Channels to run. run_rdf.py auto-resolves the inputs from -c; --kinds picks
+# which tier of those inputs to submit. Use `all` to run every physics channel
+# in run_rdf.py's ANA_CHANNELS dict.
 CHANNELS=(0lep_1FJ 0lep_2FJ)
 #CHANNELS=(all)
+
+# JES/JER variation branches, signal only: the variations are MC-only so the flag
+# is a no-op on data, and background is left nominal (the analysis is data driven).
+# Set SYSTS="" for a fully nominal pass.
+SYSTS="${SYSTS---systs}"
 
 for RUN in 2 3; do
     RUN_BASE="etc/input_sample_jsons/run${RUN}"
 
     # Signal (three variants under the all_events pass-through channel)
-     python3 run_rdf.py -i ${RUN_BASE}/sig/all_events/  -p $PREFIX -o $OUT_DIR -n r${RUN}_sig_sm  -c all_events -m $MODE -r $RUN -f 1
+     python3 run_rdf.py -i ${RUN_BASE}/sig/all_events/  -p $PREFIX -o $OUT_DIR -n r${RUN}_sig_sm  -c all_events -m $MODE -r $RUN -f 1 $SYSTS
 
-    # Sig + bkg + data per channel
-    python3 run_rdf.py -p $PREFIX -o $OUT_DIR -n r${RUN} -c "${CHANNELS[@]}" -m $MODE -r $RUN -f 1
+    # One submission per tier, so --systs reaches signal without reaching background.
+    # All three share -n, so the output layout is unchanged.
+    python3 run_rdf.py -p $PREFIX -o $OUT_DIR -n r${RUN} -c "${CHANNELS[@]}" -m $MODE -r $RUN -f 1 --kinds sig $SYSTS
+    python3 run_rdf.py -p $PREFIX -o $OUT_DIR -n r${RUN} -c "${CHANNELS[@]}" -m $MODE -r $RUN -f 1 --kinds data
+    python3 run_rdf.py -p $PREFIX -o $OUT_DIR -n r${RUN} -c "${CHANNELS[@]}" -m $MODE -r $RUN -f 1 --kinds bkg
 done

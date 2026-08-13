@@ -82,6 +82,23 @@ def check_inputs(merged_json_dict,mode):
             raise Exception("Error, more than one kind of input is specified, not able to run runAnalysis over multiple kinds")
 
 
+# Background MC is normally nominal-only: the analysis is data driven, so the bkg
+# variations are never used. runAnalysis warns too, but only once the jobs are queued.
+def check_systs(merged_json_dict,systs):
+    if not systs: return
+    bkg_samples = sorted(ds for ds,v in merged_json_dict["samples"].items()
+                         if v["metadata"].get("kind","").startswith("bkg"))
+    if not bkg_samples: return
+    print("\n" + "#"*70)
+    print(f"## WARNING: --systs will be applied to {len(bkg_samples)} BACKGROUND sample(s)")
+    print("#"*70)
+    print(f"  e.g. {bkg_samples[0]}")
+    print("  Background MC is normally nominal-only -- the analysis is data driven, so")
+    print("  these variations are not used by it. If that was not deliberate, submit the")
+    print("  tiers separately: '--kinds sig --systs' then '--kinds bkg'.")
+    print("#"*70 + "\n")
+
+
 
 ################### Main function ###################
 def main():
@@ -90,6 +107,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-i', '--jsons', nargs='+',    help = 'Input json file(s) containing files and metadata')
     parser.add_argument('-c', '--channels', nargs='+', help = 'Which analysis selection channels to run')
+    parser.add_argument('--kinds', nargs='+',          help = 'Which sample kinds to auto-resolve when -i is not given (default: all three). Use it to submit signal separately, e.g. with --systs',
+                        choices=['sig','bkg','data'], default=['sig','bkg','data'])
     parser.add_argument('-m', '--mode',                help = 'Which mode to run in (local, condor, or slurm)', choices=['local','condor','slurm'])
     parser.add_argument('-o', '--outpath',             help = 'Output directory', default=".")
     parser.add_argument('-n', '--outname',             help = 'Output name', default="rdf_output")
@@ -123,15 +142,16 @@ def main():
         if args.jsons is not None:
             merged_json_dict = merge_jsons(args.jsons)
         else:
-            # If no input jsons specified, look them up based on analysis channel
-            # Assume we want signal, data, and bkg
+            # If no input jsons specified, look them up based on analysis channel.
+            # Defaults to sig + bkg + data; --kinds narrows it to one tier, so signal
+            # can be submitted with --systs without dragging bkg along.
             run_base = f"etc/input_sample_jsons/run{args.run}"
-            jsons = [
-                f"{run_base}/sig/all_events/",
-                f"{run_base}/bkg/{ANA_CHANNELS[chan_name]}",
-                f"{run_base}/data/{ANA_CHANNELS[chan_name]}",
-            ]
-            merged_json_dict = merge_jsons(jsons)
+            kind_dirs = {
+                "sig"  : f"{run_base}/sig/all_events/",
+                "bkg"  : f"{run_base}/bkg/{ANA_CHANNELS[chan_name]}",
+                "data" : f"{run_base}/data/{ANA_CHANNELS[chan_name]}",
+            }
+            merged_json_dict = merge_jsons([kind_dirs[k] for k in args.kinds])
 
         # Prepend the appropriate prefix to all files in the input json
         if args.prefix is not None:
@@ -151,6 +171,9 @@ def main():
         # Make sure we are not passing more than one kind to RDF for one runAnalysis
         check_inputs(merged_json_dict,args.mode)
 
+        # Warn if background MC is about to be produced with the variation branches
+        check_systs(merged_json_dict,args.systs)
+
         # Make an output directory out of outpath/outname
         outdir = os.path.join(args.outpath,outname)
         if not os.path.isdir(outdir): os.makedirs(outdir)
@@ -168,7 +191,7 @@ def main():
         elif args.mode == "condor":
             dry_run_flag = " --dry-run" if args.dry_run else ""
             ncores_flag = f" -j {args.n_cores}" if args.n_cores else ""
-            command = f"python3 condor/submit.py -c {merged_json_name} -a {chan_name} --run_number {args.run} --files-per-job {args.files_per_job}{ncores_flag}{hlt_flag}{dry_run_flag}"
+            command = f"python3 condor/submit.py -c {merged_json_name} -a {chan_name} --run_number {args.run} --files-per-job {args.files_per_job}{ncores_flag}{hlt_flag}{systs_flag}{jetveto_flag}{dry_run_flag}"
             print(f"  -> Running command \"{command}\"...\n")
             os.system(command)
         elif args.mode == "slurm":

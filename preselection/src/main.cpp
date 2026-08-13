@@ -66,9 +66,6 @@ int main(int argc, char** argv) {
     std::string input_spec = args.spec;
     std::string output_file = args.name;
 
-    setStoreSysts(args.systs);
-    std::cout << " -> JES/JER variation branches: " << (args.systs ? "STORED (--systs)" : "not stored (nominal only)") << std::endl;
-
     setApplyJetVetoMaps(!args.no_jetveto);
     if (args.no_jetveto) {
         std::cout << "\n"
@@ -186,6 +183,26 @@ int main(int argc, char** argv) {
         std::cerr << "Expected: data, sig, or bkg*" << std::endl;
         std::exit(EXIT_FAILURE);
     }
+
+    // Background MC is normally nominal-only: the analysis is data driven, so the bkg
+    // variations are never used. Warn but honour the flag -- a deliberate bkg syst pass
+    // is a legitimate cross-check, it just should not happen by accident.
+    if (args.systs && !isData && !isSignal) {
+        std::cout << "\n"
+                  << "  ############################################################\n"
+                  << "  ##  WARNING: --systs on a BACKGROUND sample               ##\n"
+                  << "  ############################################################\n"
+                  << "  kind = '" << kind << "'. The JES/JER variation branches will be\n"
+                  << "  written for background MC. The statistical analysis is data\n"
+                  << "  driven, so these are not used by it -- this costs a large\n"
+                  << "  multiple of the disk and CPU of the nominal-only production.\n"
+                  << "  If that was not deliberate, drop --systs and submit signal\n"
+                  << "  separately (run_rdf.py --kinds sig --systs).\n"
+                  << "  ############################################################\n"
+                  << std::endl;
+    }
+    setStoreSysts(args.systs);
+    std::cout << " -> JES/JER variation branches: " << (args.systs ? "STORED (--systs)" : "not stored (nominal only)") << std::endl;
 
     bool makeSpanetTrainingdata = args.makeSpanetTrainingdata;
     if (!isSignal) {
