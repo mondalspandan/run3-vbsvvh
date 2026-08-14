@@ -39,6 +39,7 @@ struct BTagEfficiencyMetadata {
     std::string year;
 };
 BTagEfficiencyMetadata getSingleSampleBTagEfficiencyMetadata(const std::string& config_path);
+std::vector<BTagEfficiencyMetadata> getBTagEfficiencyMetadata(const std::string& config_path);
 std::vector<std::string> getMCYearsFromConfig(const std::string& config_path);
 
 class FilterOnePerKind {

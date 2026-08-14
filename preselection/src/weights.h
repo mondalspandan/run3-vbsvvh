@@ -6,6 +6,10 @@
 #include <unordered_map>
 #include <string>
 #include <iostream>
+#include <map>
+#include <memory>
+#include <type_traits>
+#include <utility>
 
 #include "ROOT/RDataFrame.hxx"
 #include "ROOT/RDFHelpers.hxx"
@@ -350,7 +354,27 @@ const std::unordered_map<std::string, std::string> bTaggingScaleFactors_LF_corrn
     {"2025", "UParTAK4_light"}
 };
 
-RNode applyBTaggingScaleFactors(std::unordered_map<std::string, correction::CorrectionSet> cset_btag, std::unordered_map<std::string, std::string> corrname_map_HF, std::unordered_map<std::string, std::string> corrname_map_LF, const std::string &channel, const std::string &sample, const std::string &nuisance_year, const std::vector<std::string> &working_points, RNode df);
+using BTagCorrectionRef = std::decay_t<decltype(std::declval<const correction::CorrectionSet &>().at(std::declval<std::string>()))>;
+
+struct BTagEfficiencyContext {
+    std::string efficiency_sample;
+    std::string efficiency_name;
+    std::shared_ptr<correction::CorrectionSet> efficiency_set;
+    BTagCorrectionRef efficiency;
+    BTagCorrectionRef hf_sf;
+    BTagCorrectionRef lf_sf;
+};
+
+using BTagEfficiencyContexts = std::map<std::pair<std::string, std::string>, BTagEfficiencyContext>;
+
+BTagEfficiencyContexts prepareBTagEfficiencyContexts(
+    const std::vector<BTagEfficiencyMetadata> &metadata,
+    const std::string &channel,
+    const std::vector<std::string> &working_points);
+
+RNode applyBTaggingScaleFactors(const std::string &channel,
+                                const std::vector<std::string> &working_points,
+                                const BTagEfficiencyContexts &contexts, RNode df);
 void resetBTagDiagnostics();
 void printBTagDiagnostics(std::ostream &out = std::cout);
 
@@ -371,7 +395,8 @@ RNode applyLHEScaleWeight_muR(RNode df);
 RNode applyLHEWeights_pdf(RNode df);
 
 RNode applyDataWeights(RNode df);
-RNode applyMCWeights(RNode df, const std::string &channel, const std::string &sample, const std::string &nuisance_year,
-                     bool apply_btag_sf, const std::vector<std::string> &btag_working_points = {});
+RNode applyMCWeights(RNode df, const std::string &channel, bool apply_btag_sf,
+                     const std::vector<std::string> &btag_working_points,
+                     const BTagEfficiencyContexts &btag_contexts);
 
 #endif //WEIGHTS

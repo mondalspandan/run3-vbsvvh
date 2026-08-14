@@ -238,6 +238,12 @@ int main(int argc, char** argv) {
         //df = removeDuplicates(df);
     } else {
         std::cout << " -> Running MC analysis" << std::endl;
+        const bool applyBTagScaleFactors = channelBTagScaleFactors && !args.skipBTagScaleFactors;
+        const auto btag_working_points = applyBTagScaleFactors
+            ? bTagWorkingPointsForChannel(args.ana) : std::vector<std::string>{};
+        const auto btag_contexts = applyBTagScaleFactors
+            ? prepareBTagEfficiencyContexts(getBTagEfficiencyMetadata(input_spec), args.ana, btag_working_points)
+            : BTagEfficiencyContexts{};
         df = applyMCCorrections(df);
         df = runAnalysis(df, args.ana, args.run_number, isSignal, isData,
                          spanet_inference.get(), spanet_inference_run2.get(),
@@ -249,7 +255,6 @@ int main(int argc, char** argv) {
                                          btag_efficiency_metadata->year, btag_efficiency_metadata->sample, nslots);
             return 0;
         }
-        const bool applyBTagScaleFactors = channelBTagScaleFactors && !args.skipBTagScaleFactors;
         if (args.skipBTagScaleFactors)
             std::cout << " -> B-tag SF application disabled by --skip-btag-sf" << std::endl;
         else if (!channelBTagScaleFactors)
@@ -257,15 +262,7 @@ int main(int argc, char** argv) {
                       << " by applybtag.yaml" << std::endl;
         else
             std::cout << " -> Applying b-tag SFs" << std::endl;
-        const auto metadata = getSingleSampleBTagEfficiencyMetadata(input_spec);
-        const std::set<std::string> supported_btag_years = {
-            "2016preVFP", "2016postVFP", "2017", "2018", "2024Prompt"};
-        if (applyBTagScaleFactors && !supported_btag_years.count(metadata.year))
-            throw std::runtime_error(
-                "B-tag SF application is unsupported for " + metadata.year +
-                "; rerun with --skip-btag-sf");
-        df = applyMCWeights(df, args.ana, metadata.sample, metadata.year, applyBTagScaleFactors,
-                            bTagWorkingPointsForChannel(args.ana));
+        df = applyMCWeights(df, args.ana, applyBTagScaleFactors, btag_working_points, btag_contexts);
     }
 
     Cutflow::Add(df, "After SFs and corrections");

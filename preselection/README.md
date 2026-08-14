@@ -118,14 +118,14 @@ The converter requires complete manifests and schema-v2 raw outputs. It uses the
 
 ## B-tagging SF application
 
-Edit `applybtag.yaml` to choose the ordered WPs needed by each channel, for example `4lep: [L, T]`. The runtime evaluates only the configured WPs and automatically excludes the others. Use `[]` or `--skip-btag-sf` to disable SF application for a channel/invocation. When SFs are disabled, the `*_withbSF`, `weightsyst_jes`, and `weightsyst_jer` branches are not written.
+Edit `applybtag.yaml` to choose the ordered WPs needed by each channel, for example `4lep: [L, T]`. The runtime evaluates only the configured WPs and automatically excludes the others. Use `[]` or `--skip-btag-sf` to disable SF application for a channel/invocation. When SFs are disabled, the `weightsyst_*_withbSF`, `weightsyst_jes`, and `weightsyst_jer` branches are not written.
 
-The nominal `weight` already contains the central HF and LF b-tag factors, which are also available independently as `weightsyst_btag_HF_uncorrelated_<year>[0]` and `weightsyst_btag_LF_uncorrelated_<year>[0]`. To remove only the nominal b-tag correction for a diagnostic or post-processing comparison, use
+The nominal `weight` already contains the central HF and LF b-tag factors, available as the static `weightsyst_btag_HF_correlated[0]` and `weightsyst_btag_LF_correlated[0]` branches. To remove only the nominal b-tag correction for a diagnostic or post-processing comparison, use
 
 ```text
 weight_without_btag = weight /
-  (weightsyst_btag_HF_uncorrelated_<year>[0] *
-   weightsyst_btag_LF_uncorrelated_<year>[0])
+  (weightsyst_btag_HF_correlated[0] *
+   weightsyst_btag_LF_correlated[0])
 ```
 
 This retains the other corrections in `weight`. `baseweight` is instead before all lepton, b-tag, and other corrections, while the internal `_weight_*_raw` columns are not snapshotted.
