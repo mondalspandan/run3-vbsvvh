@@ -58,6 +58,10 @@ bool bTagHFSourceIsCoupled(std::string_view source) {
            source == "jes" || source == "jer";
 }
 
+bool bTagHFSourceIsYearDecorrelated(std::string_view source) {
+    return source == "uncorrelated" || source == "statistic";
+}
+
 std::string bTagHFInternalBranchName(std::string_view source) {
     return "_btagging_sf_HF_" + std::string(source);
 }
@@ -382,6 +386,15 @@ BTagEfficiencyContexts prepareBTagEfficiencyContexts(
         }
         const auto hf_sf = sf_set->second.at(hf_name->second);
         const auto lf_sf = sf_set->second.at(lf_name->second);
+        for (const auto &wp : working_points) {
+            try {
+                (void)hf_sf->evaluate({"central", wp, 5, 0., 30.});
+                (void)lf_sf->evaluate({"central", wp, 0, 0., 30.});
+            } catch (const std::exception &error) {
+                throw std::runtime_error("B-tag SF payload is missing year=" + entry.year +
+                                         ", WP=" + wp + ": " + error.what());
+            }
+        }
         for (const auto flavor : {std::string("B"), std::string("C"), std::string("L")}) {
             for (const auto &wp : working_points) {
                 try { (void)efficiency->evaluate({efficiency_sample, flavor, wp, 30., 0.}); }
@@ -865,7 +878,6 @@ RNode applyBTaggingScaleFactors(const std::string &channel,
                     std::vector<double> selected_shifted_sf;
                     selected_shifted_sf.reserve(selected_indices.size());
                     for (std::size_t selected = 0; selected < selected_indices.size(); ++selected) {
-                            const auto wp = selected_indices[selected];
                         try {
                             const double payload = ctx.hf_sf->evaluate({direction + source,
                                                                      selected_wp_names[selected],
@@ -899,12 +911,11 @@ RNode applyBTaggingScaleFactors(const std::string &channel,
         return years;
     }();
     for (const auto source : kBTagHFSources) {
-        const std::string source_name(source);
         const auto index = bTagHFSourceIndex(source);
-        if (bTagHFSourceIsCoupled(source) || source == "correlated") {
-            result = result.Define(bTagHFSourceIsCoupled(source) ? bTagHFInternalBranchName(source) : bTagHFBranchName(source),
+        if (bTagHFSourceIsCoupled(source)) {
+            result = result.Define(bTagHFInternalBranchName(source),
                                    [index](const BTagWeightBundle &bundle) { return bundle.hf[index]; }, {"_btagging_sf_bundle"});
-        } else {
+        } else if (bTagHFSourceIsYearDecorrelated(source)) {
             for (const auto &year : context_years) {
                 const std::string branch = bTagHFBranchName(source) + "_" + bTagSafeYearToken(year);
                 result = result.Define(branch,
@@ -913,6 +924,9 @@ RNode applyBTaggingScaleFactors(const std::string &channel,
                         return event_year == year ? weights : RVec<double>{weights[0], weights[0], weights[0]};
                     }, {"year", "_btagging_sf_bundle"});
             }
+        } else {
+            result = result.Define(bTagHFBranchName(source),
+                                   [index](const BTagWeightBundle &bundle) { return bundle.hf[index]; }, {"_btagging_sf_bundle"});
         }
     }
     for (const auto &year : context_years) {
