@@ -183,6 +183,14 @@ Examples:
                         help="Only make training data for SPANet (--spanet_training flag)")
     parser.add_argument("--spanet-infer", action="store_true",
                         help="Run SPANet inference (--spanet_infer flag)")
+    # Underscore names to match run_rdf.py and slurm/submit.py
+    parser.add_argument("--store_hlt", action="store_true",
+                        help="Store HLT trigger branches in output")
+    parser.add_argument("--systs", action="store_true",
+                        help="Store JES/JER variation branches (default: nominal only)")
+    parser.add_argument("--no_jetveto", action="store_true",
+                        help="DEBUG ONLY: compute Jet_vetoMap but do not apply it. "
+                             "NOT for analysis production (jet veto map study only)")
     return parser.parse_args()
 
 
@@ -408,6 +416,12 @@ def generate_submit_file(task_dir: Path, job_dir: Path, job_name: str,
         extra_flags += " --spanet_training"
     if args.spanet_infer:
         extra_flags += " --spanet_infer"
+    if args.store_hlt:
+        extra_flags += " --store_hlt"
+    if args.systs:
+        extra_flags += " --systs"
+    if args.no_jetveto:
+        extra_flags += " --no_jetveto"
 
     # Arguments passed to executable:
     # USER N_CPUS CONFIG_FILE OUTPUT_NAME ANALYSIS RUN_NUMBER SAMPLE_NAME JOB_IDX [EXTRA_FLAGS]

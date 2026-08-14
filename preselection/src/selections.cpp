@@ -26,7 +26,7 @@ inline std::string ak8GoodJetSelectionExpr(const std::string& ptCol) {
 
 // Kinematic-variation suffixes (JES + JER) whose varied jet columns actually exist in
 // this graph. Presence-checked rather than assumed: variations are MC-only (and only
-// with systematics enabled), so on data or with --no_systs this returns empty and the
+// with --systs given), so on data or in the default nominal-only mode this returns empty and the
 // selection stays nominal-only. Deriving the set from the columns the correction path
 // actually defined means there is no flag to keep in sync with that path.
 inline std::vector<std::string> activeKinVariations(RNode df) {
@@ -107,6 +107,14 @@ RNode TriggerSelections(RNode df_, std::string trigger_logic_string) {
 
     // Filter based on this the trigger logic
     return df_.Filter(trigger_condition, "C1: Trigger Selection");
+}
+
+// Same defaulting TriggerSelections does, but with no Filter: the decision is
+// stored for offline use rather than applied here.
+RNode storeTriggerBranches(RNode df_, const std::vector<std::string> &paths)
+{
+    for (const auto &path : paths) df_ = df_.DefaultValueFor(path, (bool)false);
+    return df_;
 }
 
 
@@ -308,6 +316,31 @@ RNode AK8JetsSelection(RNode df_)
     auto df = df_.Define("_dR_ak8_lep", VVdR, {"FatJet_eta", "FatJet_phi", "lepton_eta", "lepton_phi"})
                   .Define("_good_ak8jets", ak8GoodJetSelectionExpr("FatJet_pt"));
 
+    // GloParT regressed mass: the calibrated AK8 mass used by the analysis. massCorrX2p is a
+    // ratio predicting the particle-level mass from the RAW jet, so it multiplies the raw mass
+    // snapshotted before JEC (_FatJet_rawmass, from snapshotRawJetKinematics in corrections.cpp)
+    // rather than the JEC/JER-corrected FatJet_mass. It replaces the JEC/JER mass calibration
+    // for AK8 and is not stacked on top of it. Defined before applyObjectMaskNewAffix so the
+    // masked fatjet_massGloParT3 alias is created with the rest of the collection.
+    df = df.Define("FatJet_massGloParT3", "FatJet_globalParT3_massCorrX2p * _FatJet_rawmass");
+
+    // GloParT tagging discriminants, built from the raw score outputs as signal / (signal + QCD):
+    //   Hbb = Xbb / (Xbb + QCD)
+    //   Wqq = (Xqq/3 + Xcs) / (Xqq/3 + Xcs + QCD)
+    // Unlike the mass these are kinematics-independent, so they need no raw-quantity snapshot.
+    // Jets with a vanishing denominator (no score at all) get -1 rather than a NaN.
+    auto vsQCD = [](const RVec<float>& sig, const RVec<float>& qcd) {
+        RVec<float> out(sig.size(), -1.0f);
+        for (size_t i = 0; i < sig.size(); ++i) {
+            const float den = sig[i] + qcd[i];
+            if (den > 0.0f) out[i] = sig[i] / den;
+        }
+        return out;
+    };
+    df = df.Define("_FatJet_Vqq_score", "FatJet_globalParT3_Xqq / 3.0f + FatJet_globalParT3_Xcs")
+           .Define("FatJet_Hbb", vsQCD, {"FatJet_globalParT3_Xbb", "FatJet_globalParT3_QCD"})
+           .Define("FatJet_Wqq", vsQCD, {"_FatJet_Vqq_score",     "FatJet_globalParT3_QCD"});
+
     df = applyObjectMaskNewAffix(df, "_good_ak8jets", "FatJet", "fatjet");
     df = df.Define("ht_fatjets", "Sum(fatjet_pt)");
 
@@ -459,14 +492,6 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut, bool isData)
             return "(nLep_Sel == 0) && (" + fjCountCol + " == 1)";
         });
         df = df.Filter(orPassExpr(df, "0lep_1FJ"), "C2: 0lep_1FJ");
-
-        df = df.DefaultValueFor("Pileup_nTrueInt", (float)-1.f)
-                .Define("met_significance", "PuppiMET_significance")
-                .Define("met_uncorrPt", "PuppiMET_pt")
-                .Define("met_uncorrPhi", "PuppiMET_phi")
-                .Define("pileup_nTrueInt", "Pileup_nTrueInt")
-                .Define("pv_npvsGood", "PV_npvsGood");
-
     }
 
     // 0lep_1FJ_met
@@ -476,6 +501,15 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut, bool isData)
         Cutflow::Add(df, "VBS pair candidate found");
 
         df = TriggerSelections(df,trigger_logic_string_met);
+        // The trigger choice is currently applied offline instead. 
+        // These are the triggers whose decisions are written out.
+        const std::vector<std::string> met_trigger_paths = {
+            "HLT_PFMETNoMu120_PFMHTNoMu120_IDTight",
+            "HLT_PFMETNoMu110_PFMHTNoMu110_IDTight",
+            "HLT_PFMETNoMu140_PFMHTNoMu140_IDTight",
+            "HLT_PFMETNoMu120_PFMHTNoMu120_IDTight_PFHT60",
+        };
+        df = storeTriggerBranches(df, met_trigger_paths);
         Cutflow::Add(df, "C1: Trigger selection");
 
         // Channel orthogonality selection
@@ -484,6 +518,13 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut, bool isData)
             return "(nLep_Sel == 0) && (" + fjCountCol + " == 1)";
         });
         df = df.Filter(orPassExpr(df, "0lep_1FJ_met"), "C2: 0lep_1FJ");
+
+        df = df.DefaultValueFor("Pileup_nTrueInt", (float)-1.f)
+                .Define("met_significance", "PuppiMET_significance")
+                .Define("met_uncorrPt", "PuppiMET_pt")
+                .Define("met_uncorrPhi", "PuppiMET_phi")
+                .Define("pileup_nTrueInt", "Pileup_nTrueInt")
+                .Define("pv_npvsGood", "PV_npvsGood");
     }
 
     // 0lep_2FJ
@@ -501,13 +542,6 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut, bool isData)
             return "(nLep_Sel == 0) && (" + fjCountCol + " == 2)";
         });
         df = df.Filter(orPassExpr(df, "0lep_2FJ"), "C2: 0lep_2FJ");
-
-        df = df.DefaultValueFor("Pileup_nTrueInt", (float)-1.f)
-                .Define("met_significance", "PuppiMET_significance")
-                .Define("met_uncorrPt", "PuppiMET_pt")
-                .Define("met_uncorrPhi", "PuppiMET_phi")
-                .Define("pileup_nTrueInt", "Pileup_nTrueInt")
-                .Define("pv_npvsGood", "PV_npvsGood");
     }
 
     // 0lep_2FJ_met
@@ -517,6 +551,15 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut, bool isData)
         Cutflow::Add(df, "VBS pair candidate found");
 
         df = TriggerSelections(df,trigger_logic_string_met);
+        // The trigger choice is currently applied offline instead. 
+        // These are the triggers whose decisions are written out.
+        const std::vector<std::string> met_trigger_paths = {
+            "HLT_PFMETNoMu120_PFMHTNoMu120_IDTight",
+            "HLT_PFMETNoMu110_PFMHTNoMu110_IDTight",
+            "HLT_PFMETNoMu140_PFMHTNoMu140_IDTight",
+            "HLT_PFMETNoMu120_PFMHTNoMu120_IDTight_PFHT60",
+        };
+        df = storeTriggerBranches(df, met_trigger_paths);
         Cutflow::Add(df, "C1: Trigger selection");
 
         // Channel orthogonality selection
@@ -525,6 +568,13 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut, bool isData)
             return "(nLep_Sel == 0) && (" + fjCountCol + " == 2)";
         });
         df = df.Filter(orPassExpr(df, "0lep_2FJ_met"), "C2: 0lep_2FJ");
+
+        df = df.DefaultValueFor("Pileup_nTrueInt", (float)-1.f)
+                .Define("met_significance", "PuppiMET_significance")
+                .Define("met_uncorrPt", "PuppiMET_pt")
+                .Define("met_uncorrPhi", "PuppiMET_phi")
+                .Define("pileup_nTrueInt", "Pileup_nTrueInt")
+                .Define("pv_npvsGood", "PV_npvsGood");
     }
 
     // 0lep_3FJ

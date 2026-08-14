@@ -82,6 +82,26 @@ def check_inputs(merged_json_dict,mode):
             raise Exception("Error, more than one kind of input is specified, not able to run runAnalysis over multiple kinds")
 
 
+# Print a warning (but do not block) if --systs was given for a submission that
+# contains background MC. Background MC is normally nominal-only: the analysis is
+# data driven, so the bkg variations are never used, and producing them just costs
+# job time and disk. runAnalysis warns about this too, but only once the jobs are
+# already queued, so this catches it up front at submission time.
+def check_systs(merged_json_dict,systs):
+    if not systs: return
+    bkg_samples = sorted(ds for ds,v in merged_json_dict["samples"].items()
+                         if v["metadata"].get("kind","").startswith("bkg"))
+    if not bkg_samples: return
+    print("\n" + "#"*70)
+    print(f"## WARNING: --systs will be applied to {len(bkg_samples)} BACKGROUND sample(s)")
+    print("#"*70)
+    print(f"  e.g. {bkg_samples[0]}")
+    print("  Background MC is normally nominal-only -- the analysis is data driven, so")
+    print("  these variations are not used by it. If that was not deliberate, submit the")
+    print("  tiers separately: '--kinds sig --systs' then '--kinds bkg'.")
+    print("#"*70 + "\n")
+
+
 
 ################### Main function ###################
 def main():
@@ -90,6 +110,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-i', '--jsons', nargs='+',    help = 'Input json file(s) containing files and metadata')
     parser.add_argument('-c', '--channels', nargs='+', help = 'Which analysis selection channels to run')
+    parser.add_argument('--kinds', nargs='+',          help = 'Which sample kinds to auto-resolve when -i is not given (default: all three). Use it to submit signal separately, e.g. with --systs',
+                        choices=['sig','bkg','data'], default=['sig','bkg','data'])
     parser.add_argument('-m', '--mode',                help = 'Which mode to run in (local, condor, or slurm)', choices=['local','condor','slurm'])
     parser.add_argument('-o', '--outpath',             help = 'Output directory', default=".")
     parser.add_argument('-n', '--outname',             help = 'Output name', default="rdf_output")
@@ -99,6 +121,15 @@ def main():
     parser.add_argument('-f', '--files-per-job',       help = 'Number of input files per job (default: 10)', default=10, type=int)
     parser.add_argument('-d', '--dry-run',             help = 'Do not actually execute the run command', action='store_true')
     parser.add_argument('--store-hlt',                 help = 'Store HLT trigger branches in output', action='store_true')
+    # --systs is a property of the submission, not of a sample kind, 
+    # so it applies to every MC sample in each runAnalysis call (it 
+    # is a no-op on data). There is therefore no single command that
+    #  varies signal while leaving background nominal.
+    # Use --kinds to submit the tiers separately, as run_wrapper.sh does:
+    #     run_rdf.py ... --kinds sig --systs
+    #     run_rdf.py ... --kinds bkg
+    #     run_rdf.py ... --kinds data
+    parser.add_argument('--systs',                     help = 'Store JES/JER variation branches for every MC sample in THIS submission. Off by default (nominal only, all kinds). Not per-kind: to vary signal but not background, submit the tiers separately with --kinds', action='store_true')
     parser.add_argument('--no-jetveto',                help = 'DEBUG ONLY: compute Jet_vetoMap but do not apply it (no Run 3 event veto, no jet masking). NOT for analysis production -- jet veto map validation study only', action='store_true')
     parser.add_argument('--memory',                    help = 'Memory per job for slurm submission (default: 8gb)', default=None)
     parser.add_argument('--time',                      help = 'Time limit per job for slurm submission (default: 04:00:00)', default=None)
@@ -122,15 +153,16 @@ def main():
         if args.jsons is not None:
             merged_json_dict = merge_jsons(args.jsons)
         else:
-            # If no input jsons specified, look them up based on analysis channel
-            # Assume we want signal, data, and bkg
+            # If no input jsons specified, look them up based on analysis channel.
+            # Defaults to sig + bkg + data; --kinds narrows it to one tier, so signal
+            # can be submitted with --systs without dragging bkg along.
             run_base = f"etc/input_sample_jsons/run{args.run}"
-            jsons = [
-                f"{run_base}/sig/all_events/",
-                f"{run_base}/bkg/{ANA_CHANNELS[chan_name]}",
-                f"{run_base}/data/{ANA_CHANNELS[chan_name]}",
-            ]
-            merged_json_dict = merge_jsons(jsons)
+            kind_dirs = {
+                "sig"  : f"{run_base}/sig/all_events/",
+                "bkg"  : f"{run_base}/bkg/{ANA_CHANNELS[chan_name]}",
+                "data" : f"{run_base}/data/{ANA_CHANNELS[chan_name]}",
+            }
+            merged_json_dict = merge_jsons([kind_dirs[k] for k in args.kinds])
 
         # Prepend the appropriate prefix to all files in the input json
         if args.prefix is not None:
@@ -150,6 +182,9 @@ def main():
         # Make sure we are not passing more than one kind to RDF for one runAnalysis
         check_inputs(merged_json_dict,args.mode)
 
+        # Warn if background MC is about to be produced with the variation branches
+        check_systs(merged_json_dict,args.systs)
+
         # Make an output directory out of outpath/outname
         outdir = os.path.join(args.outpath,outname)
         if not os.path.isdir(outdir): os.makedirs(outdir)
@@ -157,16 +192,17 @@ def main():
 
         # Construct the bash run command
         hlt_flag = " --store_hlt" if args.store_hlt else ""
+        systs_flag = " --systs" if args.systs else ""
         # DEBUG ONLY -- see runAnalysis --no_jetveto. Never use for analysis production.
         jetveto_flag = " --no_jetveto" if args.no_jetveto else ""
         if args.mode == "local":
-            command = f"bin/runAnalysis -i {merged_json_name} -o {outdir} -n {args.outname} -a {chan_name} -j {args.n_cores or 64} --run_number {args.run} --progress{hlt_flag}{jetveto_flag}"
+            command = f"bin/runAnalysis -i {merged_json_name} -o {outdir} -n {args.outname} -a {chan_name} -j {args.n_cores or 64} --run_number {args.run} --progress{hlt_flag}{systs_flag}{jetveto_flag}"
             print(f"  -> Now running command \"{command}\"...\n")
             if not args.dry_run: os.system(command)
         elif args.mode == "condor":
             dry_run_flag = " --dry-run" if args.dry_run else ""
             ncores_flag = f" -j {args.n_cores}" if args.n_cores else ""
-            command = f"python3 condor/submit.py -c {merged_json_name} -a {chan_name} --run_number {args.run} --files-per-job {args.files_per_job}{ncores_flag}{hlt_flag}{dry_run_flag}"
+            command = f"python3 condor/submit.py -c {merged_json_name} -a {chan_name} --run_number {args.run} --files-per-job {args.files_per_job}{ncores_flag}{hlt_flag}{systs_flag}{jetveto_flag}{dry_run_flag}"
             print(f"  -> Running command \"{command}\"...\n")
             os.system(command)
         elif args.mode == "slurm":
@@ -175,7 +211,7 @@ def main():
             time_flag = f" --time {args.time}" if args.time else ""
             ncores_flag = f" -j {args.n_cores}" if args.n_cores else ""
             sample_flag = f" --sample '{args.sample}'" if args.sample else ""
-            command = f"python3 slurm/submit.py -c {merged_json_name} -a {chan_name} --run_number {args.run} --files-per-job {args.files_per_job} --qos {args.qos} --account avery -o {outdir}{hlt_flag}{jetveto_flag}{dry_run_flag}{memory_flag}{time_flag}{ncores_flag}{sample_flag}"
+            command = f"python3 slurm/submit.py -c {merged_json_name} -a {chan_name} --run_number {args.run} --files-per-job {args.files_per_job} --qos {args.qos} --account avery -o {outdir}{hlt_flag}{systs_flag}{jetveto_flag}{dry_run_flag}{memory_flag}{time_flag}{ncores_flag}{sample_flag}"
             print(f"  -> Running command \"{command}\"...\n")
             os.system(command)
 

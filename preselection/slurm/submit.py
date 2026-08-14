@@ -144,6 +144,8 @@ Examples:
                         help="Run SPANet inference (--spanet_infer flag)")
     parser.add_argument("--store_hlt", action="store_true",
                         help="Store HLT trigger branches in output")
+    parser.add_argument("--systs", action="store_true",
+                        help="Store JES/JER variation branches (default: nominal only)")
     parser.add_argument("--no_jetveto", action="store_true",
                         help="DEBUG ONLY: compute Jet_vetoMap but do not apply it. "
                              "NOT for analysis production (jet veto map study only)")
@@ -218,6 +220,8 @@ def generate_slurm_script(task_dir: Path, job_dir: Path, job_name: str,
         extra_flags += " --spanet_infer"
     if args.store_hlt:
         extra_flags += " --store_hlt"
+    if args.systs:
+        extra_flags += " --systs"
     if args.no_jetveto:
         extra_flags += " --no_jetveto"
 
@@ -273,6 +277,8 @@ def generate_array_sbatch(task_dir: Path, job_entries: List[dict],
         extra_flags += " --spanet_infer"
     if args.store_hlt:
         extra_flags += " --store_hlt"
+    if args.systs:
+        extra_flags += " --systs"
     if args.no_jetveto:
         extra_flags += " --no_jetveto"
 
@@ -287,8 +293,7 @@ def generate_array_sbatch(task_dir: Path, job_entries: List[dict],
 #SBATCH --time={args.time}
 #SBATCH --cpus-per-task={args.ncpus}
 #SBATCH --partition={args.partition}
-{acct_line}{qos_line}
-#SBATCH --array=0-{n_jobs - 1}
+{acct_line}{qos_line}#SBATCH --array=0-{n_jobs - 1}
 #SBATCH --output={task_dir}/slurm_default_%A_%a.out
 #SBATCH --error={task_dir}/slurm_default_%A_%a.err
 
@@ -428,6 +433,7 @@ def main():
     print(f"CPUs/job:     {args.ncpus}")
     print(f"Memory/job:   {args.memory}")
     print(f"Partition:    {args.partition}")
+    print(f"QOS:          {args.qos or '(default)'}")
     print(f"Time limit:   {args.time}")
     print(f"Task dir:     {task_dir}")
     print(f"{'='*60}\n")
