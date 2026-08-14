@@ -51,16 +51,18 @@ echo "Batch mode: $MODE"
 CHANNELS=(0lep_1FJ 0lep_2FJ)
 #CHANNELS=(all)
 
-# JES/JER variation branches, signal only: the variations are MC-only so the flag
-# is a no-op on data, and background is left nominal (the analysis is data driven).
-# Set SYSTS="" for a fully nominal pass.
+# Compute and store JES/JER variation branches. No-op on data.
+# Only passed to --kind signal, while background is left nominal (the analysis is data driven). If you need to pass it to backgorund MC, just add $SYSTS to the "--kind bkg" call below.
+# Set SYSTS="" for a fully nominal pass. 
 SYSTS="${SYSTS---systs}"
 
 for RUN in 2 3; do
     RUN_BASE="etc/input_sample_jsons/run${RUN}"
 
-    # Signal (three variants under the all_events pass-through channel)
-     python3 run_rdf.py -i ${RUN_BASE}/sig/all_events/  -p $PREFIX -o $OUT_DIR -n r${RUN}_sig_sm  -c all_events -m $MODE -r $RUN -f 1 $SYSTS
+    # Signal through the all_events pass-through channel, i.e. no analysis selection
+    # at all. Not part of the standard production -- uncomment only for studies that
+    # need the signal before any channel selection (e.g. acceptance/efficiency).
+    #python3 run_rdf.py -i ${RUN_BASE}/sig/all_events/  -p $PREFIX -o $OUT_DIR -n r${RUN}_sig_sm  -c all_events -m $MODE -r $RUN -f 1 $SYSTS
 
     # One submission per tier, so --systs reaches signal without reaching background.
     # All three share -n, so the output layout is unchanged.

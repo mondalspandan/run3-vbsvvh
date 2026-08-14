@@ -82,8 +82,11 @@ def check_inputs(merged_json_dict,mode):
             raise Exception("Error, more than one kind of input is specified, not able to run runAnalysis over multiple kinds")
 
 
-# Background MC is normally nominal-only: the analysis is data driven, so the bkg
-# variations are never used. runAnalysis warns too, but only once the jobs are queued.
+# Print a warning (but do not block) if --systs was given for a submission that
+# contains background MC. Background MC is normally nominal-only: the analysis is
+# data driven, so the bkg variations are never used, and producing them just costs
+# job time and disk. runAnalysis warns about this too, but only once the jobs are
+# already queued, so this catches it up front at submission time.
 def check_systs(merged_json_dict,systs):
     if not systs: return
     bkg_samples = sorted(ds for ds,v in merged_json_dict["samples"].items()
@@ -118,7 +121,15 @@ def main():
     parser.add_argument('-f', '--files-per-job',       help = 'Number of input files per job (default: 10)', default=10, type=int)
     parser.add_argument('-d', '--dry-run',             help = 'Do not actually execute the run command', action='store_true')
     parser.add_argument('--store-hlt',                 help = 'Store HLT trigger branches in output', action='store_true')
-    parser.add_argument('--systs',                     help = 'Store JES/JER variation branches. Off by default: most channels are data-driven, so background MC is normally nominal-only', action='store_true')
+    # --systs is a property of the submission, not of a sample kind, 
+    # so it applies to every MC sample in each runAnalysis call (it 
+    # is a no-op on data). There is therefore no single command that
+    #  varies signal while leaving background nominal.
+    # Use --kinds to submit the tiers separately, as run_wrapper.sh does:
+    #     run_rdf.py ... --kinds sig --systs
+    #     run_rdf.py ... --kinds bkg
+    #     run_rdf.py ... --kinds data
+    parser.add_argument('--systs',                     help = 'Store JES/JER variation branches for every MC sample in THIS submission. Off by default (nominal only, all kinds). Not per-kind: to vary signal but not background, submit the tiers separately with --kinds', action='store_true')
     parser.add_argument('--no-jetveto',                help = 'DEBUG ONLY: compute Jet_vetoMap but do not apply it (no Run 3 event veto, no jet masking). NOT for analysis production -- jet veto map validation study only', action='store_true')
     parser.add_argument('--memory',                    help = 'Memory per job for slurm submission (default: 8gb)', default=None)
     parser.add_argument('--time',                      help = 'Time limit per job for slurm submission (default: 04:00:00)', default=None)
