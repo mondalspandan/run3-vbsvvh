@@ -189,6 +189,10 @@ Examples:
                         help="Store HLT trigger branches in output (--store_hlt flag)")
     parser.add_argument("--skip-btag-sf", action="store_true",
                         help="Skip b-tag SF application (normally enabled)")
+    parser.add_argument("--systs", action="store_true",
+                        help="Store JES/JER variation branches (default: nominal only)")
+    parser.add_argument("--no_jetveto", "--no-jetveto", dest="no_jetveto", action="store_true",
+                        help="DEBUG ONLY: compute Jet_vetoMap but do not apply it")
     return parser.parse_args()
 
 
@@ -414,6 +418,10 @@ def generate_submit_file(task_dir: Path, job_dir: Path, job_name: str,
         extra_flags += " --spanet_training"
     if args.spanet_infer:
         extra_flags += " --spanet_infer"
+    if args.systs:
+        extra_flags += " --systs"
+    if args.no_jetveto:
+        extra_flags += " --no_jetveto"
     if args.btag_eff:
         extra_flags += " --btag_eff"
     if args.store_hlt:

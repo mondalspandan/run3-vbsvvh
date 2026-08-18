@@ -79,7 +79,10 @@ def apply_prefix(in_dict,prefix):
 def check_inputs(merged_json_dict, mode, btag_eff=False):
     if len(merged_json_dict["samples"]) == 0:
         raise Exception("Error, no samples specified")
-    # Local mode is split into one runAnalysis invocation per sample below.
+    if mode == "local":
+        kinds = {info["metadata"]["kind"] for info in merged_json_dict["samples"].values()}
+        if len(kinds) != 1:
+            raise Exception("Error, more than one kind of input is specified, not able to run runAnalysis over multiple kinds")
 
 
 def select_btag_year(merged_json_dict, year):
@@ -99,6 +102,21 @@ def output_dir_for_channel(outpath, outname, channel, mode, btag_eff, year=None)
     return os.path.join(outpath, f"{channel}_{outname}")
 
 
+def check_systs(merged_json_dict,systs):
+    if not systs: return
+    bkg_samples = sorted(ds for ds,v in merged_json_dict["samples"].items()
+                         if v["metadata"].get("kind","").startswith("bkg"))
+    if not bkg_samples: return
+    print("\n" + "#"*70)
+    print(f"## WARNING: --systs will be applied to {len(bkg_samples)} BACKGROUND sample(s)")
+    print("#"*70)
+    print(f"  e.g. {bkg_samples[0]}")
+    print("  Background MC is normally nominal-only -- the analysis is data driven, so")
+    print("  these variations are not used by it. If that was not deliberate, submit the")
+    print("  tiers separately: '--kinds sig --systs' then '--kinds bkg'.")
+    print("#"*70 + "\n")
+
+
 
 ################### Main function ###################
 def main():
@@ -107,6 +125,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-i', '--jsons', nargs='+',    help = 'Input json file(s) containing files and metadata')
     parser.add_argument('-c', '--channels', nargs='+', help = 'Which analysis selection channels to run')
+    parser.add_argument('--kinds', nargs='+',          help = 'Which sample kinds to auto-resolve when -i is not given (default: all three). Use it to submit signal separately, e.g. with --systs',
+                        choices=['sig','bkg','data'], default=['sig','bkg','data'])
     parser.add_argument('-m', '--mode',                help = 'Which mode to run in (local, condor, or slurm)', choices=['local','condor','slurm'])
     parser.add_argument('-o', '--outpath',             help = 'Output directory', default=".")
     parser.add_argument('-n', '--outname',             help = 'Output name', default="rdf_output")
@@ -116,13 +136,23 @@ def main():
     parser.add_argument('-f', '--files-per-job',       help = 'Number of input files per job (default: 10)', default=10, type=int)
     parser.add_argument('-d', '--dry-run',             help = 'Do not actually execute the run command', action='store_true')
     parser.add_argument('--store-hlt',                 help = 'Store HLT trigger branches in output', action='store_true')
+    # --systs is a property of the submission, not of a sample kind,
+    # so it applies to every MC sample in each runAnalysis call (it
+    # is a no-op on data). There is therefore no single command that
+    #  varies signal while leaving background nominal.
+    # Use --kinds to submit the tiers separately, as run_wrapper.sh does:
+    #     run_rdf.py ... --kinds sig --systs
+    #     run_rdf.py ... --kinds bkg
+    #     run_rdf.py ... --kinds data
+    parser.add_argument('--systs',                     help = 'Store JES/JER variation branches for every MC sample in THIS submission. Off by default (nominal only, all kinds). Not per-kind: to vary signal but not background, submit the tiers separately with --kinds', action='store_true')
     parser.add_argument('--memory',                    help = 'Memory per job for slurm submission (default: 8gb)', default=None)
     parser.add_argument('--time',                      help = 'Time limit per job for slurm submission (default: 04:00:00)', default=None)
     parser.add_argument('--sample',                    help = 'Regex to filter which samples to submit (slurm/condor only)', default=None)
     parser.add_argument('--btag-eff',                  help = 'Write raw selected-AK4 b-tag efficiency histograms (MC only)', action='store_true')
     parser.add_argument('--year',                      help = 'Required metadata year for --btag-eff production')
     parser.add_argument('--skip-btag-sf',              help = 'Skip b-tag SF application (normally enabled)', action='store_true')
-    parser.add_argument('--no_jetveto',                help = 'DEBUG ONLY: compute Jet_vetoMap but do not apply it', action='store_true')
+    parser.add_argument('--no-jetveto', '--no_jetveto', dest='no_jetveto',
+                        help='DEBUG ONLY: compute Jet_vetoMap but do not apply it', action='store_true')
     parser.add_argument('--qos',                       help = 'qos for slurm submission (slurm only)', default='avery')
     args = parser.parse_args()
     if args.btag_eff and not args.year:
@@ -152,19 +182,20 @@ def main():
         if args.jsons is not None:
             merged_json_dict = merge_jsons(args.jsons)
         else:
-            # If no input jsons specified, look them up based on analysis channel
-            # Normal production includes signal, background, and data.  The
-            # b-tag efficiency mode is MC-only, so do not create data jobs.
+            # Auto-resolve tiered inputs. all_events is the signal pass-through
+            # channel, and efficiency production intentionally excludes data.
             run_base = f"etc/input_sample_jsons/run{args.run}"
             if chan_name == "all_events":
                 jsons = [f"{run_base}/sig/all_events/"]
             else:
-                jsons = [
-                    f"{run_base}/sig/all_events/",
-                    f"{run_base}/bkg/{ANA_CHANNELS[chan_name]}",
-                ]
-                if not args.btag_eff:
-                    jsons.append(f"{run_base}/data/{ANA_CHANNELS[chan_name]}")
+                kind_dirs = {
+                    "sig": f"{run_base}/sig/all_events/",
+                    "bkg": f"{run_base}/bkg/{ANA_CHANNELS[chan_name]}",
+                    "data": f"{run_base}/data/{ANA_CHANNELS[chan_name]}",
+                }
+                selected_kinds = [kind for kind in args.kinds
+                                  if not args.btag_eff or kind != "data"]
+                jsons = [kind_dirs[kind] for kind in selected_kinds]
             merged_json_dict = merge_jsons(jsons)
 
         # Prepend the appropriate prefix to all files in the input json
@@ -176,6 +207,7 @@ def main():
 
         # Validate before creating output artifacts or invoking a backend.
         check_inputs(merged_json_dict, args.mode, args.btag_eff)
+        check_systs(merged_json_dict, args.systs)
 
         # B-tag Slurm production writes the converter's documented layout
         # directly: INPUT_ROOT/CHANNEL/{manifest.json,SAMPLE/output_N.root}.
@@ -185,13 +217,10 @@ def main():
         # A local invocation cannot mix samples/years in one RDataFrame.  The
         # batch backends already split samples themselves.
         jobs = [(None, merged_json_dict)]
-        if args.mode == "local":
-            jobs = [(sample, {"samples": {sample: info}})
-                    for sample, info in merged_json_dict["samples"].items()]
 
         for sample_name, job_config in jobs:
             outname = f"{chan_name}_{args.outname}"
-            suffix = f"_{sample_name}" if sample_name else ""
+            suffix = ""
             if not os.path.exists("merged_jsons"): os.mkdir("merged_jsons")
             timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
             merged_json_name = os.path.join("merged_jsons", f"merged_{outname}{suffix}_{timestamp}.json")
@@ -201,28 +230,27 @@ def main():
 
             outdir = output_dir_for_channel(args.outpath, args.outname, chan_name, args.mode,
                                             args.btag_eff, args.year)
-            if sample_name:
-                outdir = os.path.join(outdir, sample_name)
             if not (args.btag_eff and args.mode == "slurm") and not os.path.isdir(outdir):
                 os.makedirs(outdir)
             print(f"  -> RDF output will be located in: {outdir}")
 
             # Construct the backend command.
             hlt_flag = " --store_hlt" if args.store_hlt else ""
+            systs_flag = " --systs" if args.systs else ""
             jetveto_flag = " --no_jetveto" if args.no_jetveto else ""
             btag_eff_flag = " --btag-eff" if args.btag_eff else ""
             skip_btag_sf_flag = " --skip-btag-sf" if args.skip_btag_sf else ""
             sample_flag = f" --sample '{args.sample}'" if args.sample else ""
             if args.mode == "local":
-                local_name = f"{args.outname}_{sample_name}" if sample_name else args.outname
-                command = f"bin/runAnalysis -i {merged_json_name} -o {outdir} -n {local_name} -a {chan_name} -j {args.n_cores or 64} --run_number {args.run} --progress{hlt_flag}{jetveto_flag}{' --btag_eff' if args.btag_eff else ''}{' --skip-btag-sf' if args.skip_btag_sf else ''}"
+                local_name = args.outname
+                command = f"bin/runAnalysis -i {merged_json_name} -o {outdir} -n {local_name} -a {chan_name} -j {args.n_cores or 64} --run_number {args.run} --progress{hlt_flag}{systs_flag}{jetveto_flag}{' --btag_eff' if args.btag_eff else ''}{' --skip-btag-sf' if args.skip_btag_sf else ''}"
                 print(f"  -> Now running command \"{command}\"...\n")
                 if not args.dry_run:
                     subprocess.run(command, shell=True, check=True)
             elif args.mode == "condor":
                 dry_run_flag = " --dry-run" if args.dry_run else ""
                 ncores_flag = f" -j {args.n_cores}" if args.n_cores else ""
-                command = f"python3 condor/submit.py -c {merged_json_name} -a {chan_name} --run_number {args.run} --files-per-job {args.files_per_job}{ncores_flag}{hlt_flag}{jetveto_flag}{btag_eff_flag}{skip_btag_sf_flag}{sample_flag}{dry_run_flag}"
+                command = f"python3 condor/submit.py -c {merged_json_name} -a {chan_name} --run_number {args.run} --files-per-job {args.files_per_job}{ncores_flag}{hlt_flag}{systs_flag}{jetveto_flag}{btag_eff_flag}{skip_btag_sf_flag}{sample_flag}{dry_run_flag}"
                 print(f"  -> Running command \"{command}\"...\n")
                 subprocess.run(command, shell=True, check=True)
             elif args.mode == "slurm":
@@ -232,7 +260,7 @@ def main():
                 ncores_flag = f" -j {args.n_cores}" if args.n_cores else ""
                 year_flag = f" --year {args.year}" if args.btag_eff else ""
                 qos_flag = f" --qos {args.qos}" if args.qos else ""
-                command = f"python3 slurm/submit.py -c {merged_json_name} -a {chan_name} --run_number {args.run} --files-per-job {args.files_per_job} --account avery{qos_flag} -o {outdir}{year_flag}{hlt_flag}{jetveto_flag}{btag_eff_flag}{skip_btag_sf_flag}{dry_run_flag}{memory_flag}{time_flag}{ncores_flag}{sample_flag}"
+                command = f"python3 slurm/submit.py -c {merged_json_name} -a {chan_name} --run_number {args.run} --files-per-job {args.files_per_job} --account avery{qos_flag} -o {outdir}{year_flag}{hlt_flag}{systs_flag}{jetveto_flag}{btag_eff_flag}{skip_btag_sf_flag}{dry_run_flag}{memory_flag}{time_flag}{ncores_flag}{sample_flag}"
                 print(f"  -> Running command \"{command}\"...\n")
                 subprocess.run(command, shell=True, check=True)
 
