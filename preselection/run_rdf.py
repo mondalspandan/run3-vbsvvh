@@ -76,7 +76,7 @@ def apply_prefix(in_dict,prefix):
 
 # Do a check of the merged json to make sure it does not have more than one kind (if we're in local mode)
 # This is because the runAnalysis assumes all inputs are of the same kind
-def check_inputs(merged_json_dict, mode, btag_eff=False):
+def check_inputs(merged_json_dict, mode):
     if len(merged_json_dict["samples"]) == 0:
         raise Exception("Error, no samples specified")
     if mode == "local":
@@ -206,7 +206,7 @@ def main():
             select_btag_year(merged_json_dict, args.year)
 
         # Validate before creating output artifacts or invoking a backend.
-        check_inputs(merged_json_dict, args.mode, args.btag_eff)
+        check_inputs(merged_json_dict, args.mode)
         check_systs(merged_json_dict, args.systs)
 
         # B-tag Slurm production writes the converter's documented layout
