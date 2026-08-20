@@ -306,7 +306,9 @@ RNode AK4JetProperties(RNode df_)
     df_ = applyJetVetoMaps(df_);
     return df_.Define("Jet_isTightBTag", isbTagTight, {"year", "Jet_btagUParTAK4B"})
               .Define("Jet_isMediumBTag", isbTagMedium, {"year", "Jet_btagUParTAK4B"})
-              .Define("Jet_isLooseBTag", isbTagLoose, {"year", "Jet_btagUParTAK4B"});
+              .Define("Jet_isLooseBTag", isbTagLoose, {"year", "Jet_btagUParTAK4B"})
+              .Define("Jet_isExtraTightBTag", isbTagExtraTight, {"year", "Jet_btagUParTAK4B"})
+              .Define("Jet_isExtraExtraTightBTag", isbTagExtraExtraTight, {"year", "Jet_btagUParTAK4B"});
 }
 
 
@@ -371,7 +373,7 @@ RNode VBSTagging(RNode df_, std::string jetCollectionName = "jet")
     const bool fjCleaned = (jetCollectionName == "jet");
     const std::string maskStem = fjCleaned ? "Jet_isGood" : "Jet_isGoodNoFJClean";
 
-    // Continue to store the full four vector of the two VBS candidates when running 
+    // Continue to store the full four vector of the two VBS candidates when running
     // on nominal for backwards compatibility.
     auto df = df_
         .Define("_vbs_candidate_jet_pairs", VBSBDTInfer, {jetCollectionName + "_pt", jetCollectionName + "_eta", jetCollectionName + "_phi", jetCollectionName + "_mass", "isRun2"})
@@ -390,7 +392,7 @@ RNode VBSTagging(RNode df_, std::string jetCollectionName = "jet")
                               "ROOT::Math::PtEtaPhiMVector(vbs_jet2_pt, vbs_jet2_eta, vbs_jet2_phi, vbs_jet2_mass)).M() : -999.")
         .Define("vbs_detajj", "vbs_jet1_idx >= 0 ? abs(vbs_jet1_eta - vbs_jet2_eta) : -999.");
 
-    // Nominal VBS-jet indices in the all-jet (NanoAOD Jet_*) collection, corresponding 
+    // Nominal VBS-jet indices in the all-jet (NanoAOD Jet_*) collection, corresponding
     // to the same physical jets as vbs_jet1/2_idx; stored so downstream
     // handles nominal and variations uniformly via Jet_*[vbs_jet*_Jetidx*].
     df = df.Define("vbs_jet1_Jetidx", "vbs_jet1_idx >= 0 ? static_cast<int>(ROOT::VecOps::Nonzero(" + maskStem + ")[vbs_jet1_idx]) : -1")
@@ -501,7 +503,7 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut, bool isData)
         Cutflow::Add(df, "VBS pair candidate found");
 
         df = TriggerSelections(df,trigger_logic_string_met);
-        // The trigger choice is currently applied offline instead. 
+        // The trigger choice is currently applied offline instead.
         // These are the triggers whose decisions are written out.
         const std::vector<std::string> met_trigger_paths = {
             "HLT_PFMETNoMu120_PFMHTNoMu120_IDTight",
@@ -551,7 +553,7 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut, bool isData)
         Cutflow::Add(df, "VBS pair candidate found");
 
         df = TriggerSelections(df,trigger_logic_string_met);
-        // The trigger choice is currently applied offline instead. 
+        // The trigger choice is currently applied offline instead.
         // These are the triggers whose decisions are written out.
         const std::vector<std::string> met_trigger_paths = {
             "HLT_PFMETNoMu120_PFMHTNoMu120_IDTight",
@@ -641,7 +643,7 @@ RNode runPreselection(RNode df_, std::string channel, bool noCut, bool isData)
         df = df.Filter("((nMuon_Loose == 1 && nMuon_Tight == 1 && nElectron_Veto == 0 && nElectron_Loose == 0 && nElectron_Tight == 0) || "
                        "(nMuon_Loose == 0 && nMuon_Tight == 0 && nElectron_Veto == 1 && nElectron_Loose == 1 && nElectron_Tight == 1)) && "
                        "(lepton_pt[0] > 40)");
-                       
+
         Cutflow::Add(df, "C2: 1-lepton selection");
 
         df = definePerVariationPassFlags(df, "1lep_2FJ", [](const std::string& sfx){

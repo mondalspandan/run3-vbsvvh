@@ -6,6 +6,10 @@
 #include <unordered_map>
 #include <string>
 #include <iostream>
+#include <map>
+#include <memory>
+#include <type_traits>
+#include <utility>
 
 #include "ROOT/RDataFrame.hxx"
 #include "ROOT/RDFHelpers.hxx"
@@ -316,35 +320,63 @@ B-TAGGING SFs
 ############################################
 */
 const std::unordered_map<std::string, correction::CorrectionSet> bTaggingScaleFactors = {
-    {"2016preVFP", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/BTV/Run2-2016preVFP-UL-NanoAODv9/latest/btagging.json.gz")},
-    {"2016postVFP", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/BTV/Run2-2016postVFP-UL-NanoAODv9/latest/btagging.json.gz")},
-    {"2017", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/BTV/Run2-2017-UL-NanoAODv9/latest/btagging.json.gz")},
-    {"2018", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/BTV/Run2-2018-UL-NanoAODv9/latest/btagging.json.gz")},
+    {"2016preVFP", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/BTV/Run2-2016preVFP-UL-NanoAODv15/latest/btagging.json.gz")},
+    {"2016postVFP", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/BTV/Run2-2016postVFP-UL-NanoAODv15/latest/btagging.json.gz")},
+    {"2017", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/BTV/Run2-2017-UL-NanoAODv15/latest/btagging.json.gz")},
+    {"2018", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/BTV/Run2-2018-UL-NanoAODv15/latest/btagging.json.gz")},
     {"2022Re-recoBCD", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/BTV/Run3-22CDSep23-Summer22-NanoAODv12/latest/btagging.json.gz")},
     {"2022Re-recoE+PromptFG", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/BTV/Run3-22EFGSep23-Summer22EE-NanoAODv12/latest/btagging.json.gz")},
     {"2023PromptC", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/BTV/Run3-23CSep23-Summer23-NanoAODv12/latest/btagging.json.gz")},
     {"2023PromptD", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/BTV/Run3-23DSep23-Summer23BPix-NanoAODv12/latest/btagging.json.gz")},
     {"2024Prompt", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/BTV/Run3-24CDEReprocessingFGHIPrompt-Summer24-NanoAODv15/latest/btagging.json.gz")},
-    {"eff", *CorrectionSet::from_file("corrections/scalefactors/btagging/btag_eff.json")}
+    {"2025", *CorrectionSet::from_file("/cvmfs/cms-griddata.cern.ch/cat/metadata/BTV/Run3-25Prompt-Summer24-NanoAODv15/latest/btagging.json.gz")}
 };
 
-// THIS NEEDS TO BE UPDATED FOR PARTICLE TRANSFORMER
+// Deliberately lazy: --btag_eff must be able to create this payload when it
+// does not yet exist in a fresh checkout or worker sandbox.
+correction::CorrectionSet loadBTagEfficiencyCorrectionSet(const std::string &year);
 
 const std::unordered_map<std::string, std::string> bTaggingScaleFactors_HF_corrname = {
-    {"2016preVFP", "deepCSV_comb"},
-    {"2016postVFP", "deepCSV_comb"},
-    {"2017", "deepCSV_comb"},
-    {"2018", "deepCSV_comb"}
+    {"2016preVFP", "UParTAK4_comb"},
+    {"2016postVFP", "UParTAK4_comb"},
+    {"2017", "UParTAK4_comb"},
+    {"2018", "UParTAK4_comb"},
+    {"2024Prompt", "UParTAK4_comb"},
+    {"2025", "UParTAK4_comb"}
 };
 
 const std::unordered_map<std::string, std::string> bTaggingScaleFactors_LF_corrname = {
-    {"2016preVFP", "deepCSV_incl"},
-    {"2016postVFP", "deepCSV_incl"},
-    {"2017", "deepCSV_incl"},
-    {"2018", "deepCSV_incl"}
+    {"2016preVFP", "UParTAK4_light"},
+    {"2016postVFP", "UParTAK4_light"},
+    {"2017", "UParTAK4_light"},
+    {"2018", "UParTAK4_light"},
+    {"2024Prompt", "UParTAK4_light"},
+    {"2025", "UParTAK4_light"}
 };
 
-RNode applyBTaggingScaleFactors(std::unordered_map<std::string, correction::CorrectionSet> cset_btag, std::unordered_map<std::string, std::string> corrname_map_HF, std::unordered_map<std::string, std::string> corrname_map_LF, RNode df);
+using BTagCorrectionRef = std::decay_t<decltype(std::declval<const correction::CorrectionSet &>().at(std::declval<std::string>()))>;
+
+struct BTagEfficiencyContext {
+    std::string efficiency_sample;
+    std::string efficiency_name;
+    std::shared_ptr<correction::CorrectionSet> efficiency_set;
+    BTagCorrectionRef efficiency;
+    BTagCorrectionRef hf_sf;
+    BTagCorrectionRef lf_sf;
+};
+
+using BTagEfficiencyContexts = std::map<std::pair<std::string, std::string>, BTagEfficiencyContext>;
+
+BTagEfficiencyContexts prepareBTagEfficiencyContexts(
+    const std::vector<BTagEfficiencyMetadata> &metadata,
+    const std::string &channel,
+    const std::vector<std::string> &working_points);
+
+RNode applyBTaggingScaleFactors(const std::string &channel,
+                                const std::vector<std::string> &working_points,
+                                const BTagEfficiencyContexts &contexts, RNode df);
+void resetBTagDiagnostics();
+void printBTagDiagnostics(std::ostream &out = std::cout);
 
 /*
 ############################################
@@ -363,6 +395,8 @@ RNode applyLHEScaleWeight_muR(RNode df);
 RNode applyLHEWeights_pdf(RNode df);
 
 RNode applyDataWeights(RNode df);
-RNode applyMCWeights(RNode df);
+RNode applyMCWeights(RNode df, const std::string &channel, bool apply_btag_sf,
+                     const std::vector<std::string> &btag_working_points,
+                     const BTagEfficiencyContexts &btag_contexts);
 
 #endif //WEIGHTS

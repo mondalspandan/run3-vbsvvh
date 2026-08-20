@@ -36,6 +36,8 @@ B-TAGGING WORKING POINTS
 RVec<bool> isbTagLoose(std::string year, RVec<float> btag_score);
 RVec<bool> isbTagMedium(std::string year, RVec<float> btag_score);
 RVec<bool> isbTagTight(std::string year, RVec<float> btag_score);
+RVec<bool> isbTagExtraTight(std::string year, RVec<float> btag_score);
+RVec<bool> isbTagExtraExtraTight(std::string year, RVec<float> btag_score);
 
 /*
 ############################################
@@ -144,7 +146,7 @@ std::vector<std::string> unclusteredVariationSuffixes();
 
 // JER hybrid smearing (MC only). Defines Jet_jerFactor and redefines Jet_pt/Jet_mass to the
 // nominal-smeared values. With storeVariations, also writes the ±1σ SF variation branches
-// Jet_jerFactor_jerUp/Dn and Jet_pt/mass_jerUp/Dn. 
+// Jet_jerFactor_jerUp/Dn and Jet_pt/mass_jerUp/Dn.
 RNode applyJetEnergyResolution(const std::unordered_map<std::string, correction::CorrectionSet>& cset_jerc,
                                const std::unordered_map<std::string, correction::CorrectionSet>& cset_jer_smear,
                                const std::unordered_map<std::string, std::string>& jer_res_map,

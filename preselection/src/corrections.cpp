@@ -54,7 +54,7 @@ correctionlib has no "give me the newest version" API: the code asks for a tag
 by name, so the file snapshot and the requested tag string must be bumped
 together, deliberately, in one table row. Loading from `latest/` while pinning
 the tag string is what previously let the two drift apart (V3 code vs V4 file
--> silent no-op; now a hard error, see applyJetEnergyCorrections below). 
+-> silent no-op; now a hard error, see applyJetEnergyCorrections below).
 
 To adopt a newer JME release: pick the new dated dir, find the new recommended
 tag, and update the snapshot + tags in the row.
@@ -206,6 +206,14 @@ std::unordered_map<std::string, float> makeBtagWPMap(const std::string& wp) {
 const std::unordered_map<std::string, float>& btaggingWPMap_Loose()  { static const auto m = makeBtagWPMap("L"); return m; }
 const std::unordered_map<std::string, float>& btaggingWPMap_Medium() { static const auto m = makeBtagWPMap("M"); return m; }
 const std::unordered_map<std::string, float>& btaggingWPMap_Tight()  { static const auto m = makeBtagWPMap("T"); return m; }
+const std::unordered_map<std::string, float>& btaggingWPMap_ExtraTight() {
+    static const auto m = makeBtagWPMap("XT");
+    return m;
+}
+const std::unordered_map<std::string, float>& btaggingWPMap_ExtraExtraTight() {
+    static const auto m = makeBtagWPMap("XXT");
+    return m;
+}
 
 // --- MET φ corrections ------------------------------------------------------------------
 
@@ -351,6 +359,14 @@ RVec<bool> isbTagMedium(std::string year, RVec<float> btag_score) {
 
 RVec<bool> isbTagTight(std::string year, RVec<float> btag_score) {
     return btag_score > btaggingWPMap_Tight().at(year);
+}
+
+RVec<bool> isbTagExtraTight(std::string year, RVec<float> btag_score) {
+    return btag_score > btaggingWPMap_ExtraTight().at(year);
+}
+
+RVec<bool> isbTagExtraExtraTight(std::string year, RVec<float> btag_score) {
+    return btag_score > btaggingWPMap_ExtraExtraTight().at(year);
 }
 
 /*
@@ -567,7 +583,7 @@ RNode applyJetEnergyCorrections(const std::unordered_map<std::string, correction
             // that will be applied to the NanoAOD pt downstream (Jet_pt := Jet_pt * factor), so we
             // fold in the raw recovery too:
             //     pt_new = pt_raw * sf = (1 - rawFactor) * Jet_pt * sf
-            //   ⇒ factor = pt_new / Jet_pt = (1 - rawFactor) * sf            
+            //   ⇒ factor = pt_new / Jet_pt = (1 - rawFactor) * sf
             factor[i] = (1.0f - rawFactor[i]) * static_cast<float>(sf);
         }
         return factor;
@@ -599,7 +615,7 @@ RNode applyJetEnergyCorrections(const std::unordered_map<std::string, correction
 
 /*
 ############################################
-FAT JET (AK8) ENERGY CORRECTIONS — nominal 
+FAT JET (AK8) ENERGY CORRECTIONS — nominal
 ############################################
 
 Same recipe as AK4 (raw recovery + L1L2L3Res compound from fatJet_jerc.json.gz, with the
@@ -1060,7 +1076,7 @@ static const std::vector<JESSourceSpec> kJESRegroupedSources = {
 };
 static const std::array<const char*, 2> kJESDirections = {"Up", "Dn"};
 
-// MET unclustered energy (UES) variation table, pairing the NanoAOD branch and our 
+// MET unclustered energy (UES) variation table, pairing the NanoAOD branch and our
 // output suffix that follows this framework's Up/Dn convention.
 struct UESVariationSpec {
     const char* suffix;     // our column suffix, e.g. "metunclUp" → met_pt_metunclUp
@@ -1249,7 +1265,7 @@ RNode applyType1MET(RNode df, bool isData) {
                    {"year", "_Jet_rawpt", "Jet_eta", "Jet_phi", "Jet_area",
                     "Jet_muonSubtrFactor", "_t1_jet_musubDphi", "_t1_jet_emfrac",
                     "Rho_fixedGridRhoFastjetAll", "run"});
-    // Handle CorrT1METJet collection (already raw pt, no rawFactor)                  
+    // Handle CorrT1METJet collection (already raw pt, no rawFactor)
     df = df.Define("_t1_ct1_blocks", build_blocks,
                    {"year", "CorrT1METJet_rawPt", "CorrT1METJet_eta", "CorrT1METJet_phi",
                     "CorrT1METJet_area", "CorrT1METJet_muonSubtrFactor", "_t1_ct1_musubDphi",
@@ -1449,7 +1465,7 @@ MET UNCLUSTERED ENERGY (UES) VARIATIONS
 MET = -Σ p⃗_T over all PF candidates, and for systematics that sum splits into two disjoint
 pieces. The clustered part carries JES/JER, already propagated by
 applyType1MET. The unclustered remainder has a scale uncertainty of its own, computed in CMSSW by
-pat::MET::shiftedP4(UnclusteredEnUp/Down). 
+pat::MET::shiftedP4(UnclusteredEnUp/Down).
 
 Being disjoint from the jet sum also makes the shift JEC-invariant, which is what lets it
 be lifted from NanoAOD as a vector and added to our rebuilt Type-1 MET.
@@ -1460,7 +1476,7 @@ Taking the difference is what cancels nano's JEC:
   px± = met_pt·cos(met_phi) + dx±,    py± = met_pt·sin(met_phi) + dy±
 
 Runs after applyType1MET and before applyMETPhiCorrections, so met_pt/met_phi here are the
-pre-φ-corrected Type-1 rebuild. 
+pre-φ-corrected Type-1 rebuild.
 */
 
 RNode applyMETUnclusteredVariations(RNode df, bool isData) {
@@ -1515,7 +1531,7 @@ RNode applyMETPhiCorrections(RNode df, bool isData) {
     auto eval_correction = [isData] (std::string year, float pt, float phi, unsigned char npvs, unsigned int run) {
         double pt_corr = pt;
         double phi_corr = phi;
-        
+
         if (metCorrections().find(year) == metCorrections().end()) {
             static std::unordered_set<std::string> warned_years;
             if (warned_years.find(year) == warned_years.end()) {
@@ -1533,11 +1549,11 @@ RNode applyMETPhiCorrections(RNode df, bool isData) {
         float pt_to_pass = std::min(pt,pt_max);
         pt_corr = metCorrections().at(year).at(pt_corr_name)->evaluate({pt_to_pass, phi, static_cast<double>(npvs), static_cast<double>(run)});
         phi_corr = metCorrections().at(year).at(phi_corr_name)->evaluate({pt_to_pass, phi, static_cast<double>(npvs), static_cast<double>(run)});
-        
+
         return std::make_pair(static_cast<float>(pt_corr), static_cast<float>(phi_corr));
     };
     // Runs after applyType1MET + applyMETUnclusteredVariations, so it refines the
-    // already-rebuilt MET rather than starting from PuppiMET. 
+    // already-rebuilt MET rather than starting from PuppiMET.
     // TO CHECK IF THIS IS CORRECT
     //
     // It is added to each varied column rather than corrected once on the nominal and
@@ -1590,7 +1606,7 @@ HEM Corrections
 
 RNode HEMCorrection(RNode df, bool isData) {
     auto HEMCorrections = [isData](unsigned int run, unsigned long long event, std::string sample_year, RVec<float> pt, RVec<float> eta, RVec<float> phi, RVec<float> jet_id) {
-        RVec<bool> jet_mask;   
+        RVec<bool> jet_mask;
         if (sample_year == "2018" && ((isData && run >= 319077) || (!isData && event % 100 < 64))) {
             jet_mask = (jet_id >= 2 && pt > 15.0); // v>= 30 skims follow NanoAOD jetID convention https://twiki.cern.ch/twiki/bin/view/CMSPublic/WorkBookNanoAOD#Jets
                                                     // works also for v < 30 skims, which set jetId==3 : "pass tight ID, fail tightLepVeto", jetId==7 : "pass tight and tightLepVeto ID"
@@ -1628,7 +1644,7 @@ RNode applyElectronScaleAndSmearing(RNode df, bool isData) {
 
         for (size_t i = 0; i < pt.size(); i++) {
             float scEta = eta[i] + deltaEtaSC[i];
-            scales[i] = electronSSCorrections().at(year).compound().at("Scale")->evaluate({"scale", static_cast<double>(run), scEta, r9[i], pt[i], static_cast<double>(seedGain[i])}); 
+            scales[i] = electronSSCorrections().at(year).compound().at("Scale")->evaluate({"scale", static_cast<double>(run), scEta, r9[i], pt[i], static_cast<double>(seedGain[i])});
         }
         return scales;
     };
@@ -1711,8 +1727,8 @@ JET VETO MAPS
 */
 
 /*
-The per-jet gate differs between the two runs, following the JME prescriptions. 
-Both ask for pT > 15 GeV and chEmEF + neEmEF < 0.9; they differ in the jet ID 
+The per-jet gate differs between the two runs, following the JME prescriptions.
+Both ask for pT > 15 GeV and chEmEF + neEmEF < 0.9; they differ in the jet ID
 and in the muon-overlap treatment:
 
   Run 3 : tightLepVeto jet ID.
@@ -1799,7 +1815,7 @@ variable.
 For msd, the POG-standard proxy is `GenJetAK8_mass[FatJet_genJetAK8Idx]`.
 
 Currently unwired — this analysis calibrates JMS/JMR on the GloParT mass, not
-on msd, and the GloParT calibration hasn't been derived yet. 
+on msd, and the GloParT calibration hasn't been derived yet.
 When it lands, wire the calls into `applyMCCorrections` with the
 GloParT column names + per-era shift/factor/σ_rel maps from the calibration
 fit. Up/down systematic variants add a `variation` arg carrying the ±1σ

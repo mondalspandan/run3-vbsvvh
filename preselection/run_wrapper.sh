@@ -9,7 +9,7 @@
 # The T2 path uses your lxplus username, which can differ from
 # the HPG login ($USER). Export CERN_USER in your shell or set
 # it on the line below; the expansion aborts the script if unset.
-CERN_USER="${CERN_USER:?please set CERN_USER=<your T2 username>}"
+CERN_USER="${CERN_USER:?Please set CERN_USER to your T2 username}"
 PREFIX="/cmsuf/data/"
 OUT_DIR="/cmsuf/data/store/user/$CERN_USER/vbs_vvh_rdf"
 
@@ -51,9 +51,11 @@ echo "Batch mode: $MODE"
 CHANNELS=(0lep_1FJ 0lep_2FJ)
 #CHANNELS=(all)
 
+# Run-3 MC-only b-tag efficiency production for every channel and sample:
+# python3 run_rdf.py -p "$PREFIX" -o "$OUT_DIR" -n run3_btag_eff -c all -m "$MODE" -r 3 -f 1 --btag-eff --year 2024Prompt
 # Compute and store JES/JER variation branches. No-op on data.
 # Only passed to --kind signal, while background is left nominal (the analysis is data driven). If you need to pass it to backgorund MC, just add $SYSTS to the "--kind bkg" call below.
-# Set SYSTS="" for a fully nominal pass. 
+# Set SYSTS="" for a fully nominal pass.
 SYSTS="${SYSTS---systs}"
 
 for RUN in 2 3; do
