@@ -74,6 +74,7 @@ B-tag efficiencies have been derived for all retained analysis channels and all 
 - `2024Prompt`
 
 The final year-scoped payloads are `corrections/scalefactors/btagging/btag_eff_<year>.json`. The `_met` trigger subsets and `all_events` are intentionally excluded from the payload construction. The stored `*_mcstat_unc` values are diagnostic only and are not consumed by the analysis.
+For normal b-tag SF application, 2025 resolves its efficiency family, channel, and correction from the 2024Prompt payload (`btag_eff_2024Prompt.json`), while using the official 2025 BTV SF payload. Branches are emitted only for sources present in at least one input year; sources unavailable for a particular event year receive the central value in that branch, while sources absent from the input are not written. The 2025 payload maps logical `topmass` to `mass`, and emits its available `jesRegrouped_*` sources as `weightsyst_btag_HF_jesRegrouped_*` branches; generic `jes`, `pdfas`, and `bfragmentation` remain unpopulated for 2025.
 
 <details>
 <summary>Derivation instructions and tutorial</summary>

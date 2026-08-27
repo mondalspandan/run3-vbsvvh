@@ -26,10 +26,11 @@ inline double bTagMaxAbsEta(const std::string &year) {
 }
 
 // The Run-2 UParTAK4 SF payloads are tabulated below |eta|=2.4, while the
-// selected-jet acceptance remains |eta|<2.5 for 2017/2018.  Clamp only the
-// SF lookup coordinate to the valid payload domain; do not discard those jets.
+// selected-jet acceptance remains |eta|<2.5 for 2017/2018 and 2024/2025.
+// Clamp only the SF lookup coordinate to the valid payload domain; do not
+// discard those jets.
 inline double bTagSFAbsEta(const std::string &year, double eta) {
-    const double payload_max = year == "2024Prompt" ? 2.5 : 2.4;
+    const double payload_max = (year == "2024Prompt" || year == "2025") ? 2.5 : 2.4;
     return std::min(std::abs(eta), std::nextafter(payload_max, 0.0));
 }
 
