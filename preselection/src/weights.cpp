@@ -1,5 +1,6 @@
 #include "weights.h"
 #include "btag_settings.h"
+#include "corrections.h"
 
 #include <algorithm>
 #include <array>
@@ -56,6 +57,43 @@ const std::map<std::string, std::set<std::string>> kBTagHFAvailableSources = {
                "jesRegrouped_RelativeBal", "jesRegrouped_RelativeSample_2024"}}
 };
 
+enum class BTagJESScheme { None, Total, Regrouped11 };
+
+struct BTagJESMapping {
+    std::string_view analysis_source;
+    std::string_view payload_source;
+};
+
+constexpr std::array<BTagJESMapping, 11> kBTagJES2025Mapping = {{
+    {"Absolute", "jesRegrouped_Absolute"},
+    {"BBEC1", "jesRegrouped_BBEC1"},
+    {"EC2", "jesRegrouped_EC2"},
+    {"HF", "jesRegrouped_HF"},
+    {"RelativeBal", "jesRegrouped_RelativeBal"},
+    {"FlavorQCD", "jesRegrouped_FlavorQCD"},
+    {"AbsoluteYear", "jesRegrouped_Absolute_2024"},
+    {"BBEC1Year", "jesRegrouped_BBEC1_2024"},
+    {"EC2Year", "jesRegrouped_EC2_2024"},
+    {"HFYear", "jesRegrouped_HF_2024"},
+    {"RelativeSampleYear", "jesRegrouped_RelativeSample_2024"},
+}};
+
+bool bTagHFSourceAvailable(const std::string &year, std::string_view source);
+
+BTagJESScheme bTagJESSchemeForYear(std::string_view year) {
+    if (year == "2025") return BTagJESScheme::Regrouped11;
+    if (year == "2024Prompt" || bTagHFSourceAvailable(std::string(year), "jes"))
+        return BTagJESScheme::Total;
+    return BTagJESScheme::None;
+}
+
+bool bTagHFSourceIsRegroupedJES(std::string_view source) {
+    return std::find_if(kBTagJES2025Mapping.begin(), kBTagJES2025Mapping.end(),
+                        [source](const BTagJESMapping &mapping) {
+                            return mapping.payload_source == source;
+                        }) != kBTagJES2025Mapping.end();
+}
+
 bool bTagHFSourceAvailable(const std::string &year, std::string_view source) {
     const auto year_it = kBTagHFAvailableSources.find(year);
     return year_it != kBTagHFAvailableSources.end() && year_it->second.count(std::string(source));
@@ -74,7 +112,8 @@ std::string bTagHFBranchName(std::string_view source) {
 
 bool bTagHFSourceIsCoupled(std::string_view source) {
     // Generic JES/JER are coupled to the corresponding kinematic event
-    // variations; regrouped JES sources are independent b-tag nuisances.
+    // variations; 2025 regrouped JES sources are kept private and materialized
+    // as companions of the matching analysis JES variations.
     return source == "pileup" || source == "isrdef" || source == "fsrdef" || source == "muf" || source == "mur" ||
            source == "jes" || source == "jer";
 }
@@ -424,23 +463,30 @@ BTagEfficiencyContexts prepareBTagEfficiencyContexts(
                 throw std::runtime_error("B-tag SF payload is missing year=" + entry.year +
                                          ", WP=" + wp + ": " + error.what());
             }
-            if (entry.year != "2025") continue;
-            for (const auto logical_source : kBTagHFSources) {
-                const std::string payload_source = bTagHFPayloadSource(entry.year, logical_source);
-                if (payload_source.empty()) continue;
-                for (const auto direction : {std::string("up_"), std::string("down_")}) {
-                    for (const int flavor : {5, 4}) {
-                        try {
-                            (void)hf_sf->evaluate({direction + payload_source, wp, flavor, 0., 30.});
-                        } catch (const std::exception &error) {
-                            throw std::runtime_error("B-tag HF SF payload is missing year=" + entry.year +
-                                                     ", logical_source=" + std::string(logical_source) +
-                                                     ", payload_source=" + payload_source +
-                                                     ", direction=" + direction + ", flavor=" + std::to_string(flavor) +
-                                                     ", WP=" + wp + ": " + error.what());
-                        }
-                    }
+            const auto jes_scheme = bTagJESSchemeForYear(entry.year);
+            const auto validate_hf_jes = [&](std::string_view analysis_source,
+                                             std::string_view payload_source,
+                                             const std::string &direction,
+                                             int flavor) {
+                try {
+                    (void)hf_sf->evaluate({direction + std::string(payload_source), wp, flavor, 0., 30.});
+                } catch (const std::exception &error) {
+                    throw std::runtime_error("B-tag JES SF payload is missing year=" + entry.year +
+                                             ", analysis_source=" + std::string(analysis_source) +
+                                             ", payload_source=" + std::string(payload_source) +
+                                             ", WP=" + wp + ", flavor=" + std::to_string(flavor) +
+                                             ", direction=" + direction + ": " + error.what());
                 }
+            };
+            if (jes_scheme == BTagJESScheme::Total) {
+                for (const auto direction : {std::string("up_"), std::string("down_")})
+                    for (const int flavor : {5, 4})
+                        validate_hf_jes("jesTotal", "jes", direction, flavor);
+            } else if (jes_scheme == BTagJESScheme::Regrouped11) {
+                for (const auto &mapping : kBTagJES2025Mapping)
+                    for (const auto direction : {std::string("up_"), std::string("down_")})
+                        for (const int flavor : {5, 4})
+                            validate_hf_jes(mapping.analysis_source, mapping.payload_source, direction, flavor);
             }
         }
         for (const auto flavor : {std::string("B"), std::string("C"), std::string("L")}) {
@@ -967,7 +1013,10 @@ RNode applyBTaggingScaleFactors(const std::string &channel,
         for (const auto &year : context_years)
             present_in_input = present_in_input || !bTagHFPayloadSource(year, source).empty();
         if (!present_in_input) continue;
-        if (bTagHFSourceIsCoupled(source)) {
+        if (bTagHFSourceIsRegroupedJES(source)) {
+            result = result.Define(bTagHFInternalBranchName(source),
+                                   [index](const BTagWeightBundle &bundle) { return bundle.hf[index]; }, {"_btagging_sf_bundle"});
+        } else if (bTagHFSourceIsCoupled(source)) {
             result = result.Define(bTagHFInternalBranchName(source),
                                    [index](const BTagWeightBundle &bundle) { return bundle.hf[index]; }, {"_btagging_sf_bundle"});
         } else if (bTagHFSourceIsYearDecorrelated(source)) {
@@ -1176,6 +1225,19 @@ RNode applyMCWeights(RNode df_, const std::string &channel, bool apply_btag_sf,
         if (bTagHFSourcePresentInContexts(btag_contexts, "jer"))
             df = df.Define("weightsyst_jer", bTagKinematicVariationRatios,
                            {bTagHFInternalBranchName("jer")});
+
+        // 2025 BTV JES responses are companions of the matching analysis JES
+        // variations, not independent nuisances. Only materialize them when
+        // the corresponding analysis JES columns are being stored.
+        if (!jesVariationSuffixes().empty()) {
+            for (const auto &mapping : kBTagJES2025Mapping) {
+                const std::string payload_source(mapping.payload_source);
+                if (!bTagHFSourcePresentInContexts(btag_contexts, payload_source)) continue;
+                df = df.Define("weightsyst_jes" + std::string(mapping.analysis_source),
+                               bTagKinematicVariationRatios,
+                               {bTagHFInternalBranchName(payload_source)});
+            }
+        }
     }
 
     std::string nominal_weight = std::string("weight *") +

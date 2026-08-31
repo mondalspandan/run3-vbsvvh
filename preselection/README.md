@@ -74,7 +74,7 @@ B-tag efficiencies have been derived for all retained analysis channels and all 
 - `2024Prompt`
 
 The final year-scoped payloads are `corrections/scalefactors/btagging/btag_eff_<year>.json`. The `_met` trigger subsets and `all_events` are intentionally excluded from the payload construction. The stored `*_mcstat_unc` values are diagnostic only and are not consumed by the analysis.
-For normal b-tag SF application, 2025 resolves its efficiency family, channel, and correction from the 2024Prompt payload (`btag_eff_2024Prompt.json`), while using the official 2025 BTV SF payload. Branches are emitted only for sources present in at least one input year; sources unavailable for a particular event year receive the central value in that branch, while sources absent from the input are not written. The 2025 payload maps logical `topmass` to `mass`, and emits its available `jesRegrouped_*` sources as `weightsyst_btag_HF_jesRegrouped_*` branches; generic `jes`, `pdfas`, and `bfragmentation` remain unpopulated for 2025.
+For normal b-tag SF application, 2025 resolves its efficiency family, channel, and correction from the 2024Prompt payload (`btag_eff_2024Prompt.json`), while using the official 2025 BTV SF payload. Branches are emitted only for sources present in at least one input year; sources unavailable for a particular event year receive the central value in that branch, while sources absent from the input are not written. The 2025 payload maps logical `topmass` to `mass`. Its 11 regrouped BTV JES responses are emitted only as companions named for the matching analysis JES source (for example, `weightsyst_jesAbsolute`) when `--systs` is enabled; they are not independent nuisances. The 2024 payload keeps one separate inclusive BTV JES-total response (`weightsyst_jes`). Run-2 legacy granular BTV JES sources are not exposed, and no BTV JES branch is written unless a supported inclusive/total source exists.
 
 <details>
 <summary>Derivation instructions and tutorial</summary>
@@ -143,7 +143,11 @@ Systematic branches are `{central, up, down}` vectors. Recommended branches to u
   - HF: `weightsyst_btag_HF_pdf`, `weightsyst_btag_HF_as`, `weightsyst_btag_HF_pdfas`, `weightsyst_btag_HF_ttbar`, `weightsyst_btag_HF_type3`, `weightsyst_btag_HF_bfragmentation`, `weightsyst_btag_HF_topmass`, `weightsyst_btag_HF_hdamp`, and `weightsyst_btag_HF_statistic_<year>`
   - LF: `weightsyst_btag_LF_correlated`, `weightsyst_btag_LF_uncorrelated_<year>`
   - Other SFs: `weightsyst_pileup_withbSF`, `weightsyst_PSISR_withbSF`, `weightsyst_PSFSR_withbSF`, `weightsyst_muF_withbSF`, and `weightsyst_muR_withbSF`
-  - With JES variation responses: `weightsyst_jes`, `weightsyst_jer`
+  - JES responses:
+    - 2025: `weightsyst_jesAbsolute`, `weightsyst_jesBBEC1`, `weightsyst_jesEC2`, `weightsyst_jesHF`, `weightsyst_jesRelativeBal`, `weightsyst_jesFlavorQCD`, `weightsyst_jesAbsoluteYear`, `weightsyst_jesBBEC1Year`, `weightsyst_jesEC2Year`, `weightsyst_jesHFYear`, and `weightsyst_jesRelativeSampleYear` are companions of the corresponding analysis JES nuisances, not independent BTV nuisances.
+    - 2024: `weightsyst_jes` is one separate inclusive BTV JES-total nuisance; do not duplicate it across the 11 analysis JES sources.
+    - Run 2: no BTV JES branch is written for payloads without a supported inclusive/total source; legacy granular sources are intentionally not exposed.
+    - `weightsyst_jer` remains the BTV JER response where available.
 
 
 ---
